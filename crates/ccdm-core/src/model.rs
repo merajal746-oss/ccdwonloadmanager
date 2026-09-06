@@ -107,6 +107,8 @@ pub struct DownloadEntry {
     pub downloaded_bytes: u64,
     /// Segments this download is split into.
     pub chunks: Vec<Chunk>,
+    /// Per-entry connection override (None = follow current default).
+    pub segments: Option<usize>,
 }
 
 impl DownloadEntry {
@@ -120,6 +122,7 @@ impl DownloadEntry {
             total_bytes: None,
             downloaded_bytes: 0,
             chunks: Vec::new(),
+            segments: None,
         }
     }
 

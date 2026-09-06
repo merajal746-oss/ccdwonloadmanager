@@ -119,6 +119,8 @@ fn en(key: &str) -> Option<&'static str> {
         "app.hint_auto" => "monitor adds copied links • sched gates starts",
         "app.clip_hint" => "Copy a download link, then hit “Add from clipboard”.",
         "tb.add" => "Add from clipboard",
+        "tb.add_url" => "Add URL",
+        "tb.cancel" => "Cancel",
         "tb.speed" => "Speed: {v}",
         "tb.connections" => "Connections: {n}",
         "tb.organize" => "Organize: {v}",

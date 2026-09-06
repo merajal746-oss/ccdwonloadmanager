@@ -64,6 +64,9 @@ enum Commands {
         /// File name override (sanitized automatically).
         #[arg(short, long)]
         name: Option<String>,
+        /// Connections for this entry (default: config value).
+        #[arg(short, long)]
+        connections: Option<usize>,
     },
     /// Show the persisted queue.
     List,
@@ -350,7 +353,7 @@ async fn main() -> anyhow::Result<()> {
                 )
             );
         }
-        Commands::Add { url, name } => {
+        Commands::Add { url, name, connections } => {
             let info = http::probe(&client, &url)
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -360,13 +363,14 @@ async fn main() -> anyhow::Result<()> {
             };
             let mut store = Store::load().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             let id = next_id(store.queue().len());
-            let entry = DownloadEntry::with_plan(
+            let mut entry = DownloadEntry::with_plan(
                 id.clone(),
                 info.final_url.clone(),
                 file_name.clone(),
                 info.total_bytes,
                 config.max_connections,
             );
+            entry.segments = connections;
             store.queue_mut().add(entry);
             store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!(
@@ -447,16 +451,19 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", i18n::t(&lang, "c.none"));
                 return Ok(());
             }
-            let segments = connections.unwrap_or(config.max_connections).clamp(1, 32);
             let (mut done, mut failed) = (0u32, 0u32);
             for one in ids {
-                let (url, file_name) = match store.queue_mut().get_mut(&one) {
+                let (url, file_name, entry_segments) = match store.queue_mut().get_mut(&one) {
                     Some(e) if e.status == DownloadStatus::Queued => {
                         e.status = DownloadStatus::Downloading;
-                        (e.url.clone(), e.file_name.clone())
+                        (e.url.clone(), e.file_name.clone(), e.segments)
                     }
                     _ => continue,
                 };
+                let segments = connections
+                    .or(entry_segments)
+                    .unwrap_or(config.max_connections)
+                    .clamp(1, 32);
                 store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 let dest = resolve_dest(
                     &config.download_dir,

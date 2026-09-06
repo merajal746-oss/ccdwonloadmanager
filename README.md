@@ -51,10 +51,12 @@ No Rust toolchain needed — everything is built by CI.
 ## GUI usage
 
 Run `ccdm-gpui`. Copy a download link anywhere, hit **Add from clipboard**
-(probes the URL in the background), then **Start**. **Pause** stops at the
+(probes the URL in the background), or **Add URL** to type one (Enter
+submits), then **Start**. **Pause** stops at the
 next chunk boundary; **Resume** continues from the `.part` files. The queue
 is shared with the CLI, so `ccdm-cli list` sees GUI downloads too.
 
+- Each row has its own connection override (`8×` cycles 1→32)
 - Finished rows: **Folder** (reveals the file), **Again** (re-downloads),
   **MP3** (converts via ffmpeg)
 - **Organize** sorts new downloads into `Video/`, `Documents/`, … subfolders
@@ -68,7 +70,7 @@ is shared with the CLI, so `ccdm-cli list` sees GUI downloads too.
 ```sh
 ccdm-cli probe <URL>
 ccdm-cli download <URL> [--output out.bin] [--connections 8]
-ccdm-cli add <URL> [--name file.zip]
+ccdm-cli add <URL> [--name file.zip] [--connections 8]
 ccdm-cli list
 ccdm-cli start [--id ID] [--connections 8] [--force] [--wait] [--shutdown]
 ccdm-cli convert <file> [--to mp3|mp4]
@@ -138,8 +140,7 @@ add a language by dropping `<code>.json` into the `lang` folder —
 
 ## Known limitations
 
-DASH multi-audio muxing, SQLite named queues, in-GUI text input beyond
-settings fields, per-row connection override, encrypted HLS, live DASH.
+SQLite named queues, encrypted HLS, live DASH.
 
 ## License
 

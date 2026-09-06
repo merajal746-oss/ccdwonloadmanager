@@ -715,6 +715,19 @@ fn pick_dash(streams: &[DashStream]) -> Option<&DashStream> {
         .or_else(|| streams.iter().max_by_key(|s| s.bandwidth))
 }
 
+/// Richest audio-only rendition, if the manifest labels one.
+fn pick_audio(streams: &[DashStream]) -> Option<&DashStream> {
+    streams
+        .iter()
+        .filter(|s| {
+            s.mime
+                .as_deref()
+                .map(|m| m.starts_with("audio/"))
+                .unwrap_or(false)
+        })
+        .max_by_key(|s| s.bandwidth)
+}
+
 /// Fetch a (small) text playlist, refusing oversized bodies.
 async fn fetch_text(client: &reqwest::Client, url: &str, max_bytes: u64) -> Result<String> {
     let resp = client.get(url).send().await.map_err(CcdmError::from)?;
@@ -870,6 +883,49 @@ where
             if best.segments.is_empty() {
                 return Err(CcdmError::Other("empty DASH stream".to_string()));
             }
+            let mux_audio = pick_audio(&streams)
+                .filter(|a| a.id != best.id && !a.segments.is_empty())
+                .filter(|_| crate::convert::ffmpeg_binary().is_some());
+            if let Some(audio) = mux_audio {
+                let audio_tmp = dest.with_extension("audio.tmp");
+                let mut audio_file = tokio::fs::File::create(&audio_tmp)
+                    .await
+                    .map_err(CcdmError::from)?;
+                if let Some(init) = &audio.init {
+                    append_url(
+                        client,
+                        init,
+                        &mut audio_file,
+                        &limiter,
+                        &cancel,
+                        &mut downloaded,
+                        &progress,
+                    )
+                    .await?;
+                }
+                for segment in &audio.segments {
+                    append_url(
+                        client,
+                        segment,
+                        &mut audio_file,
+                        &limiter,
+                        &cancel,
+                        &mut downloaded,
+                        &progress,
+                    )
+                    .await?;
+                }
+                audio_file.flush().await.map_err(CcdmError::from)?;
+                drop(file);
+                let muxed = dest.with_extension("muxed.mp4");
+                crate::video::mux_av(&dest, &audio_tmp, &muxed)?;
+                let _ = tokio::fs::remove_file(&audio_tmp).await;
+                tokio::fs::rename(&muxed, &dest)
+                    .await
+                    .map_err(CcdmError::from)?;
+                progress(downloaded, None);
+                return Ok(());
+            }
             if let Some(init) = &best.init {
                 append_url(
                     client,
@@ -1020,6 +1076,25 @@ mod tests {
         assert_eq!(
             streams[0].init.as_deref(),
             Some("https://h.com/m/video/init.mp4")
+        );
+    }
+
+    #[test]
+    fn mpd_audio_picked_separately() {
+        let text = r#"<MPD type="static"><Period duration="PT20S"><AdaptationSet mimeType="video/mp4"><SegmentTemplate timescale="1" duration="10" media="v-$Number$.m4s"/><Representation id="v" bandwidth="800"/></AdaptationSet><AdaptationSet mimeType="audio/mp4"><SegmentTemplate timescale="1" duration="10" media="a-$Number$.m4s"/><Representation id="a" bandwidth="128"/></AdaptationSet></Period></MPD>"#;
+        let streams = parse_mpd("https://h.com/m/manifest.mpd", text).unwrap();
+        assert_eq!(streams.len(), 2);
+        let video = pick_dash(&streams).unwrap();
+        assert_eq!(video.id, "v");
+        assert_eq!(video.segments.len(), 2);
+        let audio = pick_audio(&streams).unwrap();
+        assert_eq!(audio.id, "a");
+        assert_eq!(
+            audio.segments,
+            vec![
+                "https://h.com/m/a-1.m4s",
+                "https://h.com/m/a-2.m4s",
+            ]
         );
     }
 

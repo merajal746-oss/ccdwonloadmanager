@@ -74,6 +74,7 @@ struct Worker {
     total: Arc<AtomicU64>,
     cancel: CancelFlag,
     alive: Arc<AtomicBool>,
+    segments: Option<usize>,
 }
 
 impl Worker {
@@ -88,6 +89,7 @@ impl Worker {
             total: Arc::new(AtomicU64::new(0)),
             cancel: CancelFlag::new(),
             alive: Arc::new(AtomicBool::new(false)),
+            segments: None,
         }
     }
 
@@ -108,6 +110,7 @@ impl Worker {
             running: self.alive.load(Ordering::SeqCst),
             speed_bps: 0,
             eta_secs: None,
+            segments: self.segments,
         }
     }
 }
@@ -124,6 +127,7 @@ struct RowView {
     running: bool,
     speed_bps: u64,
     eta_secs: Option<u64>,
+    segments: Option<usize>,
 }
 
 /// Messages from worker threads to the UI thread.
@@ -540,6 +544,8 @@ struct DownloadManager {
     repo_field: TextField,
     sched_start: TextField,
     sched_end: TextField,
+    show_add_dialog: bool,
+    add_field: TextField,
 }
 
 impl DownloadManager {
@@ -580,7 +586,8 @@ impl DownloadManager {
         };
         let mut workers = Vec::new();
         for entry in store.queue().iter_ordered() {
-            let worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            let mut worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            worker.segments = entry.segments;
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
                 DownloadStatus::Paused => RowStatus::Paused,
@@ -620,6 +627,7 @@ impl DownloadManager {
         let repo_field = TextField::new(cx, config.update_repo.clone().unwrap_or_default());
         let sched_start = TextField::new(cx, sched_start_text);
         let sched_end = TextField::new(cx, sched_end_text);
+        let add_field = TextField::new(cx, String::new());
         if let Some(repo) = config.update_repo.clone() {
             let update_tx = tx.clone();
             let update_lang = config.language.clone();
@@ -671,6 +679,8 @@ impl DownloadManager {
             repo_field,
             sched_start,
             sched_end,
+            show_add_dialog: false,
+            add_field,
         }
     }
 
@@ -703,9 +713,37 @@ impl DownloadManager {
         let client = self.client.clone();
         let config = self.config.clone();
         let limiter = self.limiter.clone();
-        let segments = self.config.max_connections.clamp(1, 32);
+        let segments = worker
+            .segments
+            .unwrap_or(config.max_connections)
+            .clamp(1, 32);
         std::thread::spawn(move || run_download(worker, client, config, limiter, segments));
         self.notice = String::new();
+        self.persist();
+        cx.notify();
+    }
+
+    /// Cycle this row's connection override (None = follow default).
+    fn cycle_row_conns(&mut self, id: String, cx: &mut Context<Self>) {
+        const STEPS: &[Option<usize>] = &[
+            None,
+            Some(1),
+            Some(2),
+            Some(4),
+            Some(8),
+            Some(16),
+            Some(32),
+        ];
+        if let Some(worker) = self.workers.iter().find(|w| w.id == id) {
+            if worker.alive.load(Ordering::SeqCst) {
+                return;
+            }
+            let pos = STEPS
+                .iter()
+                .position(|s| *s == worker.segments)
+                .unwrap_or(0);
+            worker.segments = STEPS[(pos + 1) % STEPS.len()];
+        }
         self.persist();
         cx.notify();
     }
@@ -1123,7 +1161,7 @@ impl DownloadManager {
                     dest.display()
                 )));
             }
-            if let Some(worker) = self.workers.iter().find(|w| w.id == id) {
+        if let Some(worker) = self.workers.iter_mut().find(|w| w.id == id) {
                 worker.downloaded.store(0, Ordering::Relaxed);
             }
         }
@@ -1200,6 +1238,24 @@ impl DownloadManager {
             }
         }
         cx.notify();
+    }
+
+    fn toggle_add_dialog(&mut self, cx: &mut Context<Self>) {
+        self.show_add_dialog = !self.show_add_dialog;
+        cx.notify();
+    }
+
+    /// Submit the typed URL from the Add dialog (Enter key or Add button).
+    fn submit_add_dialog(&mut self, cx: &mut Context<Self>) {
+        let url = self.add_field.text.trim().to_string();
+        if url.is_empty() {
+            self.show_add_dialog = false;
+            cx.notify();
+            return;
+        }
+        self.add_field.set(String::new());
+        self.show_add_dialog = false;
+        self.add_url(url, cx);
     }
 
     fn add_from_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -1353,7 +1409,8 @@ impl DownloadManager {
             if self.workers.iter().any(|w| w.id == entry.id) {
                 continue;
             }
-            let worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            let mut worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            worker.segments = entry.segments;
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
                 DownloadStatus::Paused => RowStatus::Paused,
@@ -1456,6 +1513,7 @@ impl DownloadManager {
                     0 => None,
                     t => Some(t),
                 };
+                entry.segments = worker.segments;
                 entry
             })
             .collect();
@@ -1489,7 +1547,7 @@ impl DownloadManager {
 impl Render for DownloadManager {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.screen {
-            Screen::Queue => self.render_queue(cx),
+            Screen::Queue => self.render_queue(window, cx),
             Screen::Settings => self.render_settings(window, cx),
         }
     }
@@ -1521,7 +1579,7 @@ fn setting_row(
 }
 
 impl DownloadManager {
-    fn render_queue(&mut self, cx: &mut Context<Self>) -> Div {
+    fn render_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let lang = self.config.language.clone();
         let total = self.rows.len();
         let active = self.rows.iter().filter(|row| row.running).count();
@@ -1577,6 +1635,12 @@ impl DownloadManager {
                         i18n::t(&lang, "tb.add"),
                         theme.ok,
                         cx.listener(|this, _event, _window, cx| this.add_from_clipboard(cx)),
+                    ))
+                    .child(button(
+                        theme,
+                        i18n::t(&lang, "tb.add_url"),
+                        theme.primary,
+                        cx.listener(|this, _event, _window, cx| this.toggle_add_dialog(cx)),
                     ))
                     .child(
                         div()
@@ -1664,6 +1728,69 @@ impl DownloadManager {
                             .child(i18n::t(&lang, "app.hint_auto")),
                     ),
             )
+            .child(if self.show_add_dialog {
+                let (text, empty) = self.add_field.display(
+                    self.add_field.focus.is_focused(window),
+                    "https://...",
+                );
+                let focused = self.add_field.focus.is_focused(window);
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .px_3()
+                    .py_2()
+                    .bg(rgb(theme.card))
+                    .rounded_lg()
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                field_box(theme, text, empty, focused)
+                                    .track_focus(&self.add_field.focus)
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, window, cx| {
+                                            window.focus(&this.add_field.focus);
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .on_key_down(cx.listener(
+                                        |this, event: &KeyDownEvent, window, cx| {
+                                            if event.keystroke.key.as_str() == "enter" {
+                                                this.submit_add_dialog(cx);
+                                            } else {
+                                                let field = &mut this.add_field;
+                                                if field.focus.is_focused(window)
+                                                    && field.on_key(event)
+                                                {
+                                                    cx.notify();
+                                                }
+                                            }
+                                        },
+                                    )),
+                            )
+                            .child(button(
+                                theme,
+                                i18n::t(&lang, "tb.add"),
+                                theme.primary,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.submit_add_dialog(cx);
+                                }),
+                            ))
+                            .child(button(
+                                theme,
+                                i18n::t(&lang, "tb.cancel"),
+                                theme.muted,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.toggle_add_dialog(cx);
+                                }),
+                            )),
+                    )
+            } else {
+                div()
+            })
             .child(if self.rows.is_empty() {
                 div()
                     .text_sm()
@@ -1786,6 +1913,18 @@ impl DownloadManager {
                             }
                         }
                         let remove_id = row.id.clone();
+                        if !row.running {
+                            let conns_id = row.id.clone();
+                            let conns = row.segments.unwrap_or(self.config.max_connections);
+                            actions.push(button(
+                                theme,
+                                format!("{conns}×"),
+                                theme.muted,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.cycle_row_conns(conns_id.clone(), cx);
+                                }),
+                            ));
+                        }
                         actions.push(button(
                             theme,
                             i18n::t(&lang, "row.remove"),
