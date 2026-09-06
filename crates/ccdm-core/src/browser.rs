@@ -64,7 +64,7 @@ pub fn write_message<W: Write>(writer: &mut W, value: &serde_json::Value) -> Res
         .write_all(&(bytes.len() as u32).to_le_bytes())
         .map_err(CcdmError::from)?;
     writer.write_all(&bytes).map_err(CcdmError::from)?;
-    writer.flush().map_err(CcdmError::from)?;
+    writer.flush().map_err(CcdmError::from)
 }
 
 /// Answer a request; accepted downloads land in the shared queue store.

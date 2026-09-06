@@ -610,9 +610,9 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 i18n::format(&lang, "c.yt_resolving", &[("url", &url)])
             );
-            let media =
-                ccdm_core::video::resolve(&ytdlp, &url, ccdm_core::video::full_spec(&quality))
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let spec = ccdm_core::video::full_spec(&quality);
+            let media = ccdm_core::video::resolve(&ytdlp, &url, &spec)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             eprintln!(
                 "{}",
                 i18n::format(&lang, "c.yt_found", &[("title", &media.title)])

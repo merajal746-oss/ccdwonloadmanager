@@ -887,7 +887,7 @@ where
             for segment in &best.segments {
                 append_url(
                     client,
-                    &segment.uri,
+                    segment,
                     &mut file,
                     &limiter,
                     &cancel,

@@ -279,7 +279,7 @@ where
                 total,
                 limiter,
                 cancel,
-                &progress,
+                &*progress,
                 &downloaded,
             )
             .await

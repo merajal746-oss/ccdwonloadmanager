@@ -48,14 +48,14 @@ pub fn single_file_spec(quality: &str) -> &str {
 
 /// yt-dlp `-f` specs allowing merged streams (CLI `video` muxes them).
 /// Unknown values pass through untouched as custom specs.
-pub fn full_spec(quality: &str) -> &str {
+pub fn full_spec(quality: &str) -> String {
     match quality.to_lowercase().as_str() {
-        "best" => "bv*+ba/b",
-        "1080p" | "1080" => "bv*[height<=1080]+ba/b",
-        "720p" | "720" => "bv*[height<=720]+ba/b",
-        "480p" | "480" => "bv*[height<=480]+ba/b",
-        "audio" | "bestaudio" | "mp3" => "ba/b",
-        custom => custom,
+        "best" => "bv*+ba/b".to_string(),
+        "1080p" | "1080" => "bv*[height<=1080]+ba/b".to_string(),
+        "720p" | "720" => "bv*[height<=720]+ba/b".to_string(),
+        "480p" | "480" => "bv*[height<=480]+ba/b".to_string(),
+        "audio" | "bestaudio" | "mp3" => "ba/b".to_string(),
+        _ => quality.to_string(),
     }
 }
 
