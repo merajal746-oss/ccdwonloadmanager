@@ -1176,18 +1176,16 @@ impl DownloadManager {
             let result =
                 ccdm_core::convert::convert(&input, ccdm_core::convert::ConvertTarget::Mp3);
             let message = match result {
-                Ok(path) => {
-                    i18n::format(&thread_lang, "n.converted", &[("out", &path.display().to_string())])
-                }
+                Ok(path) => i18n::format(
+                    &thread_lang,
+                    "n.converted",
+                    &[("out", &path.display().to_string())],
+                ),
                 Err(e) => i18n::format(&thread_lang, "n.convert_fail", &[("e", &e.to_string())]),
             };
             let _ = update_tx.send(UiEvent::Notice(message));
         });
-        self.notice = i18n::format(
-            &lang,
-            "n.converting",
-            &[("file", &input_display)],
-        );
+        self.notice = i18n::format(&lang, "n.converting", &[("file", &input_display)]);
         cx.notify();
     }
 
