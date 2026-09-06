@@ -1550,7 +1550,7 @@ impl DownloadManager {
                     .child(div().text_xl().child(i18n::format(
                         &lang,
                         "app.live",
-                                &[("t", self.title.as_ref())],
+                        &[("t", self.title.as_ref())],
                     )))
                     .child(
                         div()
