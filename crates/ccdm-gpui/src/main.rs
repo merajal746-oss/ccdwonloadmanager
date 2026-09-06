@@ -130,6 +130,24 @@ fn new_id(n: usize) -> String {
     format!("gui-{}-{n}", now_ms())
 }
 
+/// Speed-cap steps cycled by the toolbar button (0 = unlimited).
+const SPEED_STEPS: &[u32] = &[0, 256, 512, 1024, 2048, 5120, 10240];
+/// Per-download connection steps cycled by the toolbar button.
+const CONN_STEPS: &[usize] = &[1, 2, 4, 8, 16, 32];
+
+fn speed_label(config: &AppConfig) -> String {
+    if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
+        "Speed: unlimited".to_string()
+    } else if config.speed_limit_kbps >= 1024 {
+        format!(
+            "Speed: {:.1} MiB/s",
+            config.speed_limit_kbps as f32 / 1024.0
+        )
+    } else {
+        format!("Speed: {} KiB/s", config.speed_limit_kbps)
+    }
+}
+
 /// Clickable label. `on_click` receives the mouse-down event like the
 /// official `input.rs` example does.
 fn button(
@@ -154,6 +172,7 @@ fn run_download(
     client: reqwest::Client,
     config: AppConfig,
     limiter: Option<SharedLimiter>,
+    segments: usize,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -174,7 +193,7 @@ fn run_download(
         &client,
         &worker.url,
         &dest,
-        config.max_connections.clamp(1, 32),
+        segments,
         limiter,
         Some(worker.cancel.clone()),
         move |d, t| {
@@ -325,14 +344,56 @@ impl DownloadManager {
         let client = self.client.clone();
         let config = self.config.clone();
         let limiter = self.limiter.clone();
-        std::thread::spawn(move || run_download(worker, client, config, limiter));
+        let segments = self.config.max_connections.clamp(1, 32);
+        std::thread::spawn(move || run_download(worker, client, config, limiter, segments));
         self.notice = String::new();
         self.persist();
         cx.notify();
     }
 
-    fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {
-        if let Some(name) = self.find(&id).map(|worker| {
+    /// Cycle the global speed cap; persists to `config.json` and rebuilds
+    /// the limiter for subsequently started downloads.
+    fn cycle_speed(&mut self, cx: &mut Context<Self>) {
+        let current = if self.config.enable_speed_limit {
+            self.config.speed_limit_kbps
+        } else {
+            0
+        };
+        let pos = SPEED_STEPS.iter().position(|&s| s == current).unwrap_or(0);
+        let next = SPEED_STEPS[(pos + 1) % SPEED_STEPS.len()];
+        self.config.speed_limit_kbps = next;
+        self.config.enable_speed_limit = next > 0;
+        self.limiter = SpeedLimiter::shared(
+            self.config.speed_limit_kbps,
+            self.config.enable_speed_limit,
+        );
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Cycle per-download connections; applies to newly started downloads.
+    fn cycle_conns(&mut self, cx: &mut Context<Self>) {
+        let pos = CONN_STEPS
+            .iter()
+            .position(|&c| c == self.config.max_connections)
+            .unwrap_or(3);
+        self.config.max_connections = CONN_STEPS[(pos + 1) % CONN_STEPS.len()];
+        self.save_config();
+        cx.notify();
+    }
+
+    fn save_config(&mut self) {
+        match AppConfig::config_path() {
+            Some(path) => {
+                if let Err(e) = self.config.save(&path) {
+                    self.notice = format!("config save failed: {e}");
+                }
+            }
+            None => self.notice = "no config dir on this platform".to_string(),
+        }
+    }
+
+    fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {        if let Some(name) = self.find(&id).map(|worker| {
             worker.cancel.cancel();
             worker.file_name.clone()
         }) {
@@ -527,6 +588,28 @@ impl Render for DownloadManager {
                             .child(self.notice.clone()),
                     ),
             )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button(
+                        speed_label(&self.config),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.cycle_speed(cx)),
+                    ))
+                    .child(button(
+                        format!("Connections: {}", self.config.max_connections),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.cycle_conns(cx)),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(rgb(0x6c7086))
+                            .child("apply to newly started downloads"),
+                    ),
+            )
             .child(if self.rows.is_empty() {
                 div()
                     .text_sm()
@@ -660,7 +743,11 @@ impl Render for DownloadManager {
 }
 
 fn main() {
-    let config = AppConfig::default().normalized();
+    // Same source as the CLI so both tools share settings.
+    let config = match AppConfig::config_path() {
+        Some(path) => AppConfig::load(&path).unwrap_or_default(),
+        None => AppConfig::default(),
+    };
     let client = http::build_client_with(&config).unwrap_or_else(|e| {
         eprintln!("proxy config invalid ({e}); continuing without proxy");
         http::build_client().expect("default http client")

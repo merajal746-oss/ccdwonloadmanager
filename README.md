@@ -5,9 +5,8 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.3 = live GPUI queue: worker threads + 4 Hz poll loop, progress bars,
-> start / pause (cooperative cancel) / resume / retry / remove, add-from-
-> clipboard probing, persisted queue shared with the CLI.
+> v0.4 = in-GUI settings: speed-cap + connections cycling buttons, persisted
+> to `config.json` (shared with the CLI), captured per download at start.
 > The full XDM feature set (HLS/DASH, browser integration, video converter,
 > scheduler, …) is a roadmap, ported module by module (see below).
 
@@ -89,7 +88,7 @@ Config lives in `<config-dir>/ccdm/config.json`, the queue in
 ## Roadmap
 
 - [x] Live engine ↔ GPUI wiring (progress bars, pause/resume buttons)
-- [ ] In-GUI speed-limit control + per-download connection setting
+- [x] In-GUI speed-limit control + per-download connection setting
 - [ ] Categories folders, finished-file actions (open folder, re-download)
 - [ ] HLS (m3u8) + DASH (mpd) downloaders
 - [ ] Browser integration (native-messaging host + extension)
