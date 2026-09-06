@@ -30,11 +30,7 @@ impl std::fmt::Display for MediaKind {
 
 /// Guess from URL extension and/or MIME type (no network involved).
 pub fn detect_media(url: &str, content_type: Option<&str>) -> Option<MediaKind> {
-    let path = url
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(url)
-        .to_lowercase();
+    let path = url.split(['?', '#']).next().unwrap_or(url).to_lowercase();
     if path.ends_with(".m3u8") || path.ends_with(".m3u") {
         return Some(MediaKind::Hls);
     }

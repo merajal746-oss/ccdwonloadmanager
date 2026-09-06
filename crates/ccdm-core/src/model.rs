@@ -284,9 +284,7 @@ impl Category {
     /// Find the category matching a file name's extension.
     pub fn for_file_name<'a>(categories: &'a [Self], file_name: &str) -> Option<&'a Self> {
         let ext = file_name.rsplit('.').next()?.to_lowercase();
-        categories
-            .iter()
-            .find(|c| c.extensions.contains(&ext))
+        categories.iter().find(|c| c.extensions.contains(&ext))
     }
 }
 
