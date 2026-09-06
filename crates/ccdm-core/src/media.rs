@@ -210,7 +210,9 @@ fn parse_attrs(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b'/') {
+        while i < bytes.len()
+            && (bytes[i].is_ascii_whitespace() || bytes[i] == b'/' || bytes[i] == b',')
+        {
             i += 1;
         }
         if i >= bytes.len() {
@@ -242,7 +244,7 @@ fn parse_attrs(s: &str) -> Vec<(String, String)> {
                 }
             } else {
                 let value_start = i;
-                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b',' {
                     i += 1;
                 }
                 out.push((key, s[value_start..i].to_string()));
