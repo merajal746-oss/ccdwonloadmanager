@@ -161,4 +161,3 @@ mod tests {
         assert_eq!(Schedule::parse_hhmm("nope"), None);
     }
 }
-}
