@@ -1,0 +1,35 @@
+name: fmt
+
+# Normalizes formatting (we write Rust without a local toolchain).
+# Commits fixes back; bot pushes do not retrigger CI, so dispatch the
+# CI workflow manually (or push again) after pulling this commit.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - ".github/workflows/fmt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all
+      - name: commit fixes
+        run: |
+          git config user.name "ccdm fmt bot"
+          git config user.email "fmt@localhost"
+          git add -A
+          git diff --cached --quiet && echo "already clean" && exit 0
+          git commit -m "fmt: rustfmt normalization"
+          git pull --rebase origin main || true
+          git push
