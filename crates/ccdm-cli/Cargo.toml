@@ -1,0 +1,18 @@
+[package]
+name = "ccdm-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Headless CLI downloader for ccdwonloadmanager"
+license = "GPL-2.0-only"
+
+[[bin]]
+name = "ccdm-cli"
+path = "src/main.rs"
+
+[dependencies]
+ccdm-core = { path = "../ccdm-core" }
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"

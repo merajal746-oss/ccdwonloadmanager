@@ -1,0 +1,14 @@
+[package]
+name = "ccdm-gpui"
+version = "0.1.0"
+edition = "2021"
+description = "GPUI desktop GUI for ccdwonloadmanager (v0.1 shell)"
+license = "GPL-2.0-only"
+
+[[bin]]
+name = "ccdm-gpui"
+path = "src/main.rs"
+
+[dependencies]
+ccdm-core = { path = "../ccdm-core" }
+gpui = "0.2.2"

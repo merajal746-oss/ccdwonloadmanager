@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-test:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  build:
+    name: build (${{ matrix.os }})
+    needs: check-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build release
+        run: cargo build --release --workspace
+      - name: upload windows binaries
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccdm-windows-x86_64
+          path: |
+            target/release/ccdm-cli.exe
+            target/release/ccdm-gpui.exe
+          if-no-files-found: error
+      - name: upload linux binaries
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccdm-linux-x86_64
+          path: |
+            target/release/ccdm-cli
+            target/release/ccdm-gpui
+          if-no-files-found: error
+      - name: upload macos binaries
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccdm-macos-arm64
+          path: |
+            target/release/ccdm-cli
+            target/release/ccdm-gpui
+          if-no-files-found: error
