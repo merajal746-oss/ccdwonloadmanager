@@ -174,7 +174,7 @@ pub fn guess_file_name(url: &str) -> String {
     };
     let last = parsed
         .path_segments()
-        .and_then(|s| s.filter(|p| !p.is_empty()).last())
+        .and_then(|s| s.filter(|p| !p.is_empty()).next_back())
         .unwrap_or("");
     // Strip any query-like leftovers and percent-decoding issues conservatively.
     let name = last.split(['?', '#']).next().unwrap_or("").trim();
@@ -286,7 +286,7 @@ impl Category {
         let ext = file_name.rsplit('.').next()?.to_lowercase();
         categories
             .iter()
-            .find(|c| c.extensions.iter().any(|e| *e == ext))
+            .find(|c| c.extensions.contains(&ext))
     }
 }
 

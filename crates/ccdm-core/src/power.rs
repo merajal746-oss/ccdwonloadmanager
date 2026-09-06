@@ -24,7 +24,7 @@ pub fn shutdown_command(delay_secs: u64) -> (String, Vec<String>) {
             ],
         )
     } else {
-        let minutes = (delay_secs + 59) / 60;
+        let minutes = delay_secs.div_ceil(60);
         (
             "shutdown".to_string(),
             vec!["-h".to_string(), format!("+{}", minutes.max(1))],

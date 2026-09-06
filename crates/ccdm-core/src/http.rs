@@ -198,7 +198,7 @@ where
         downloaded += bytes.len() as u64;
         progress(downloaded, total);
         if let Some(lim) = &limiter {
-            lim.lock().await.throttle(downloaded);
+            lim.lock().await.throttle(downloaded).await;
         }
     }
     file.flush().await.map_err(CcdmError::from)?;
@@ -355,7 +355,7 @@ async fn fetch_range(
         let now = downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;
         progress(now, Some(total));
         if let Some(lim) = &limiter {
-            lim.lock().await.throttle(now);
+            lim.lock().await.throttle(now).await;
         }
     }
     file.flush().await.map_err(CcdmError::from)?;

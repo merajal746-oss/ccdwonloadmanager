@@ -31,7 +31,7 @@ impl std::fmt::Display for MediaKind {
 /// Guess from URL extension and/or MIME type (no network involved).
 pub fn detect_media(url: &str, content_type: Option<&str>) -> Option<MediaKind> {
     let path = url
-        .split(|c| c == '?' || c == '#')
+        .split(['?', '#'])
         .next()
         .unwrap_or(url)
         .to_lowercase();
@@ -330,7 +330,7 @@ fn parse_iso8601(value: &str) -> Option<f64> {
         .trim()
         .strip_prefix('P')
         .or_else(|| value.trim().strip_prefix('p'))?;
-    let split = rest.find(|c| c == 'T' || c == 't');
+    let split = rest.find(['T', 't']);
     let (date, time) = match split {
         Some(i) => (&rest[..i], &rest[i + 1..]),
         None => (rest, ""),
@@ -769,7 +769,7 @@ where
         *downloaded += bytes.len() as u64;
         progress(*downloaded, None);
         if let Some(limiter) = limiter {
-            limiter.lock().await.throttle(*downloaded);
+            limiter.lock().await.throttle(*downloaded).await;
         }
     }
     Ok(())
