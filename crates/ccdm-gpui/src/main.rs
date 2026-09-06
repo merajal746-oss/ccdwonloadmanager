@@ -1743,10 +1743,7 @@ impl DownloadManager {
                                     i18n::t(&lang, "row.folder"),
                                     theme.primary,
                                     cx.listener(
-                                        move |this: &mut DownloadManager,
-                                              _event,
-                                              _window,
-                                              cx| {
+                                        move |this: &mut DownloadManager, _event, _window, cx| {
                                             this.reveal_row(folder_id.clone(), cx);
                                         },
                                     ),
@@ -2063,11 +2060,9 @@ impl DownloadManager {
                             theme,
                             letter.to_string(),
                             if on { theme.primary } else { theme.muted },
-                            cx.listener(
-                                move |this: &mut DownloadManager, _event, _window, cx| {
-                                    this.toggle_sched_day(day, cx);
-                                },
-                            ),
+                            cx.listener(move |this: &mut DownloadManager, _event, _window, cx| {
+                                this.toggle_sched_day(day, cx);
+                            }),
                         ));
                     }
                     actions
