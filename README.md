@@ -5,10 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.9 = ffmpeg convert (`convert`, GUI MP3 button), self-update check
-> (`update-check`, GUI notice), translations (embedded English + `lang/`
-> overrides, `lang` command, translated GUI/CLI), dark/light themes.
-> The original XDM-concept roadmap is now complete — see remaining limits.
+> v0.10 = YouTube-style video downloads via yt-dlp (like XDM's YDLWrapper):
+> watch-page auto-resolve in the GUI, quality picker, `video` CLI command
+> with ffmpeg muxing. Direct media links keep using the engine as before.
 
 ## What works today
 
@@ -16,7 +15,8 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 - Live queue: per-row progress bars, %/bytes, status, URL
 - Row buttons: Start, Pause (cooperative cancel), Resume, Retry, Remove
 - **Add from clipboard**: probes the URL in the background, dedupes
-- Toolbar: speed / connections / organize / monitor / sched / shutdown / theme
+- Toolbar: speed / connections / organize / monitor / sched / shutdown / theme / quality
+- Watch pages paste-and-go: auto-resolved via yt-dlp to direct files
 - Finished rows: **Folder**, **Again**, **MP3** (ffmpeg convert)
 - Translated UI, dark/light themes, auto-persisted queue
 
@@ -24,6 +24,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 - `probe` (size, name, range support, mime, media hint), one-shot `download`
 - `add` / `list` / `start [--id] [--force] [--wait] [--shutdown]`
 - `convert <file> [--to mp3|mp4]`, `update-check`, `lang [--set CODE]`
+- `video <watch-URL>` (YouTube & co. via yt-dlp, ffmpeg mux when needed)
 - Resumable segmented downloads, transient-error retries with backoff
 
 **Engine (`ccdm-core`)**
@@ -38,7 +39,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media, browser, schedule, power, convert, update, i18n
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media, browser, schedule, power, convert, update, i18n, video
 crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
 crates/ccdm-host   browser native-messaging host (--stdio/install/manifest)
@@ -71,6 +72,7 @@ port its *concepts* clean-room (no copied code):
 | Video converter | `convert::{convert, ConvertTarget}` via system ffmpeg (`convert`, GUI MP3) |
 | Updater | `update::{latest_release, is_newer}` (`update-check`, GUI notice) |
 | Translations | `i18n::{t, format, load_file}` — embedded English + `lang/*.json` |
+| Video pages (YDL) | `video::{is_video_page, resolve, mux_av}` via yt-dlp; CLI `video`, GUI auto-resolve |
 | Themes/skins | GUI `Theme` (dark/light toggle) |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
@@ -114,6 +116,7 @@ ccdm-cli start [--id ID] [--connections 8] [--force] [--wait] [--shutdown]
 ccdm-cli convert <file> [--to mp3|mp4]
 ccdm-cli update-check [--repo owner/name]
 ccdm-cli lang [--set CODE]
+ccdm-cli video <watch-URL> [--output out.mp4] [--quality best|1080p|720p|480p|audio]
 ```
 
 Config lives in `<config-dir>/ccdm/config.json`, the queue in
@@ -123,6 +126,11 @@ Edit `config.json` to set `speed_limit_kbps` / `enable_speed_limit`,
 `max_connections`, `proxy_url`, `organize_by_category`, `schedule`,
 `clipboard_monitor`, `shutdown_after_queue`, `language`, `dark_mode`,
 or `update_repo` by hand.
+
+Video pages need a `yt-dlp` binary (https://github.com/yt-dlp/yt-dlp):
+put it on PATH or set `ytdlp_path` in config; `video_quality` picks the
+rendition. The GUI resolves pasted watch links automatically (quality
+button); merged video+audio needs the CLI `video` command (ffmpeg mux).
 
 ## GUI usage (after downloading the artifact)
 
@@ -157,3 +165,4 @@ normally. **Speed** and
 - [x] Browser integration (native-messaging host + extension)
 - [x] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [x] Video probe/convert via system ffmpeg, updater, translations, themes
+- [x] YouTube-style video pages via yt-dlp (CLI `video`, GUI auto-resolve)

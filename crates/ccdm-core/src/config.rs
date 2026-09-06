@@ -40,6 +40,10 @@ pub struct AppConfig {
     pub dark_mode: bool,
     /// `owner/name` for release checks. `None` (default) disables them.
     pub update_repo: Option<String>,
+    /// Explicit yt-dlp binary path for video pages. `None` = search PATH.
+    pub ytdlp_path: Option<String>,
+    /// Preferred video quality: best|1080p|720p|480p|audio (or custom spec).
+    pub video_quality: String,
 }
 
 impl Default for AppConfig {
@@ -61,6 +65,8 @@ impl Default for AppConfig {
             language: crate::i18n::DEFAULT_LANG.to_string(),
             dark_mode: true,
             update_repo: None,
+            ytdlp_path: None,
+            video_quality: "best".to_string(),
         }
     }
 }

@@ -112,6 +112,7 @@ fn en(key: &str) -> Option<&'static str> {
         "tb.sched_off" => "Sched: off",
         "tb.shutdown" => "Shutdown: {v}",
         "tb.theme" => "Theme: {v}",
+        "tb.quality" => "Quality: {v}",
         "tb.unlimited" => "unlimited",
         "cm.on" => "on",
         "cm.off" => "off",
@@ -186,6 +187,12 @@ fn en(key: &str) -> Option<&'static str> {
         "c.upd_new" => "update available: {tag} — {url}",
         "c.lang_cur" => "language: {l}",
         "c.lang_set" => "language set to {l} (add lang/{l}.json for translations)",
+        "c.yt_noytdlp" => "yt-dlp not found — install it (https://github.com/yt-dlp/yt-dlp) or set ytdlp_path in config.json",
+        "c.yt_nostreams" => "yt-dlp returned no downloadable streams",
+        "c.yt_resolving" => "resolving {url}…",
+        "c.yt_found" => "found: {title}",
+        "c.yt_muxing" => "muxing video + audio…",
+        "n.video_only" => "{file} is video-only (CLI `video` merges audio)",
         _ => return None,
     })
 }

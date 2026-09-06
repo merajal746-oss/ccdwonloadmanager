@@ -22,6 +22,7 @@ pub mod segmented;
 pub mod speed_limiter;
 pub mod store;
 pub mod update;
+pub mod video;
 
 pub use browser::{HOST_NAME, HostRequest, HostResponse};
 pub use cancel::CancelFlag;

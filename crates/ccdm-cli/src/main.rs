@@ -102,6 +102,17 @@ enum Commands {
         #[arg(short, long)]
         set: Option<String>,
     },
+    /// Resolve a video page (YouTube & co.) via yt-dlp and download it.
+    Video {
+        /// Watch-page URL.
+        url: String,
+        /// Output file (default: video title inside the download dir).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Quality: best|1080p|720p|480p|audio (or a custom yt-dlp -f spec).
+        #[arg(short, long, default_value = "best")]
+        quality: String,
+    },
 }
 
 /// Stable-enough unique id without extra dependencies.
@@ -568,6 +579,87 @@ async fn main() -> anyhow::Result<()> {
                     "{}",
                     i18n::format(&lang, "c.lang_cur", &[("l", &config.language)])
                 );
+            }
+        }
+        Commands::Video { url, output, quality } => {
+            let ytdlp = ccdm_core::video::find_ytdlp(config.ytdlp_path.as_deref())
+                .ok_or_else(|| anyhow::anyhow!(i18n::t(&lang, "c.yt_noytdlp")))?;
+            eprintln!(
+                "{}",
+                i18n::format(&lang, "c.yt_resolving", &[("url", &url)])
+            );
+            let media =
+                ccdm_core::video::resolve(&ytdlp, &url, ccdm_core::video::full_spec(&quality))
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            eprintln!(
+                "{}",
+                i18n::format(&lang, "c.yt_found", &[("title", &media.title)])
+            );
+            let stem = sanitize_file_name(&media.title);
+            let ext = if media.direct_url.is_some() || media.video_url.is_none() {
+                media.ext.clone()
+            } else {
+                "mp4".to_string()
+            };
+            let dest = match output {
+                Some(p) => p,
+                None => {
+                    let name = format!("{stem}.{ext}");
+                    resolve_dest(
+                        &config.download_dir,
+                        &name,
+                        &Category::default_categories(),
+                        config.organize_by_category,
+                    )
+                }
+            };
+            let segments = config.max_connections.clamp(1, 32);
+            if let Some(direct) = &media.direct_url {
+                let (res, got, _) =
+                    run_with_retry(&client, direct, &dest, segments, limiter.clone(), &lang).await;
+                res?;
+                eprintln!(
+                    "{}",
+                    i18n::format(
+                        &lang,
+                        "c.done",
+                        &[("dest", &dest.display().to_string()), ("n", &got.to_string())]
+                    )
+                );
+            } else if let (Some(video), Some(audio)) = (&media.video_url, &media.audio_url) {
+                let vtmp = dest.with_extension("video.tmp");
+                let atmp = dest.with_extension("audio.tmp");
+                let (video_res, _, _) =
+                    run_with_retry(&client, video, &vtmp, segments, limiter.clone(), &lang).await;
+                video_res?;
+                let (audio_res, _, _) =
+                    run_with_retry(&client, audio, &atmp, segments, limiter.clone(), &lang).await;
+                audio_res?;
+                eprintln!("{}", i18n::t(&lang, "c.yt_muxing"));
+                ccdm_core::video::mux_av(&vtmp, &atmp, &dest)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let _ = std::fs::remove_file(&vtmp);
+                let _ = std::fs::remove_file(&atmp);
+                eprintln!(
+                    "{}",
+                    i18n::format(&lang, "c.row_done", &[("dest", &dest.display().to_string())])
+                );
+            } else if let Some(single) =
+                media.video_url.as_deref().or(media.audio_url.as_deref())
+            {
+                let (res, got, _) =
+                    run_with_retry(&client, single, &dest, segments, limiter.clone(), &lang).await;
+                res?;
+                eprintln!(
+                    "{}",
+                    i18n::format(
+                        &lang,
+                        "c.done",
+                        &[("dest", &dest.display().to_string()), ("n", &got.to_string())]
+                    )
+                );
+            } else {
+                anyhow::bail!("{}", i18n::t(&lang, "c.yt_nostreams"));
             }
         }
     }

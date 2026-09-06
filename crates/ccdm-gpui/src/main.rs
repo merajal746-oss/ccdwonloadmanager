@@ -179,6 +179,10 @@ fn shutdown_label(lang: &str, config: &AppConfig) -> String {
     i18n::format(lang, "tb.shutdown", &[("v", &on_off(lang, config.shutdown_after_queue))])
 }
 
+fn quality_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(lang, "tb.quality", &[("v", &config.video_quality)])
+}
+
 fn theme_label(lang: &str, config: &AppConfig) -> String {
     i18n::format(
         lang,
@@ -573,6 +577,17 @@ impl DownloadManager {
         cx.notify();
     }
 
+    fn cycle_quality(&mut self, cx: &mut Context<Self>) {
+        let pos = ccdm_core::video::QUALITIES
+            .iter()
+            .position(|&q| q == self.config.video_quality)
+            .unwrap_or(0);
+        self.config.video_quality =
+            ccdm_core::video::QUALITIES[(pos + 1) % ccdm_core::video::QUALITIES.len()].to_string();
+        self.save_config();
+        cx.notify();
+    }
+
     /// Clipboard monitor: auto-queue freshly copied links (cf. XDM).
     fn poll_clipboard(&mut self, cx: &mut Context<Self>) {
         if !self.config.clipboard_monitor {
@@ -760,17 +775,26 @@ impl DownloadManager {
             cx.notify();
             return;
         }
+        if ccdm_core::video::is_video_page(&url) {
+            self.add_video_page(url, cx);
+            return;
+        }
         // Probing needs async IO: worker thread, result back via channel.
         let tx = self.tx.clone();
         let client = self.client.clone();
         let count = self.workers.len();
+        let lang = self.config.language.clone();
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
             match runtime {
                 Err(e) => {
-                    let _ = tx.send(UiEvent::Notice(format!("runtime error: {e}")));
+                    let _ = tx.send(UiEvent::Notice(i18n::format(
+                        &lang,
+                        "n.rt_err",
+                        &[("e", &e.to_string())],
+                    )));
                 }
                 Ok(runtime) => match runtime.block_on(http::probe(&client, &url)) {
                     Ok(info) => {
@@ -785,9 +809,74 @@ impl DownloadManager {
                         let _ = tx.send(UiEvent::AddRow(worker));
                     }
                     Err(e) => {
-                        let _ = tx.send(UiEvent::Notice(format!("probe failed: {e}")));
+                        let _ = tx.send(UiEvent::Notice(i18n::format(
+                            &lang,
+                            "n.probe_fail",
+                            &[("e", &e.to_string())],
+                        )));
                     }
                 },
+            }
+        });
+        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url)]);
+        cx.notify();
+    }
+
+    /// Resolve a watch page through yt-dlp in a worker thread, then queue
+    /// the direct media URL like any other download.
+    fn add_video_page(&mut self, url: String, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        let tx = self.tx.clone();
+        let count = self.workers.len();
+        let ytdlp_path = self.config.ytdlp_path.clone();
+        let quality = self.config.video_quality.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(Worker, bool), ccdm_core::CcdmError> {
+                let binary = ccdm_core::video::find_ytdlp(ytdlp_path.as_deref()).ok_or_else(|| {
+                    ccdm_core::CcdmError::Other(
+                        "yt-dlp not found — set ytdlp_path in config.json for video pages"
+                            .to_string(),
+                    )
+                })?;
+                let media = ccdm_core::video::resolve(
+                    &binary,
+                    &url,
+                    ccdm_core::video::single_file_spec(&quality),
+                )?;
+                let name = format!(
+                    "{}.{}",
+                    sanitize_file_name(&media.title),
+                    media.playback_ext()
+                );
+                let Some(play) = media.playback_url() else {
+                    return Err(ccdm_core::CcdmError::Other(
+                        "yt-dlp returned no downloadable streams".to_string(),
+                    ));
+                };
+                Ok((
+                    Worker::new(new_id(count), play.to_string(), name),
+                    media.needs_mux(),
+                ))
+            })();
+            match result {
+                Ok((worker, video_only)) => {
+                    let name = worker.file_name.clone();
+                    let _ = tx.send(UiEvent::AddRow(worker));
+                    if video_only {
+                        let _ = tx.send(UiEvent::Notice(i18n::format(
+                            &lang,
+                            "n.video_only",
+                            &[("file", &name)],
+                        )));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(UiEvent::Notice(i18n::format(
+                        &lang,
+                        "n.probe_fail",
+                        &[("e", &e.to_string())],
+                    )));
+                }
             }
         });
         self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url)]);
@@ -1032,6 +1121,12 @@ impl Render for DownloadManager {
                         theme_label(&lang, &self.config),
                         theme.muted,
                         cx.listener(|this, _event, _window, cx| this.toggle_theme(cx)),
+                    ))
+                    .child(button(
+                        theme,
+                        quality_label(&lang, &self.config),
+                        theme.muted,
+                        cx.listener(|this, _event, _window, cx| this.cycle_quality(cx)),
                     ))
                     .child(
                         div()
