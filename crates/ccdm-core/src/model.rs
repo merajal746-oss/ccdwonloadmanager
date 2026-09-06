@@ -174,7 +174,7 @@ pub fn guess_file_name(url: &str) -> String {
     };
     let last = parsed
         .path_segments()
-        .and_then(|s| s.rfind(|p| !p.is_empty()))
+        .and_then(|mut s| s.rfind(|p| !p.is_empty()))
         .unwrap_or("");
     // Strip any query-like leftovers and percent-decoding issues conservatively.
     let name = last.split(['?', '#']).next().unwrap_or("").trim();
