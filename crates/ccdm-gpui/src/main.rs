@@ -26,7 +26,7 @@ use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::speed_limiter::now_ms;
 use ccdm_core::{
     AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter,
-    Store, http,
+    Store, http, media,
 };
 
 /// Engine-side state of one row.
@@ -197,7 +197,7 @@ fn run_download(
     );
     let downloaded = worker.downloaded.clone();
     let total = worker.total.clone();
-    let res = runtime.block_on(http::download_segmented(
+    let res = runtime.block_on(media::download_auto(
         &client,
         &worker.url,
         &dest,

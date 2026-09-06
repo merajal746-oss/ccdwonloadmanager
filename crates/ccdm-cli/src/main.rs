@@ -23,6 +23,7 @@ use clap::{Parser, Subcommands};
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::{
     AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter, Store, http,
+    media,
 };
 
 #[derive(Debug, Parser)]
@@ -127,7 +128,7 @@ async fn run_with_retry(
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        let res = http::download_segmented(
+        let res = media::download_auto(
             client,
             url,
             dest,
@@ -195,6 +196,11 @@ async fn main() -> anyhow::Result<()> {
                 "mime      : {}",
                 info.content_type.as_deref().unwrap_or("-")
             );
+            let media_hint = match media::detect_media(&url, info.content_type.as_deref()) {
+                Some(kind) => kind.to_string(),
+                None => "-".to_string(),
+            };
+            println!("media     : {media_hint}");
         }
         Commands::Download {
             url,
@@ -222,7 +228,7 @@ async fn main() -> anyhow::Result<()> {
             );
 
             let (got, _total, progress) = make_progress();
-            http::download_segmented(
+            media::download_auto(
                 &client,
                 &info.final_url,
                 &dest,

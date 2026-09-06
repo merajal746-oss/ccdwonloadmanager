@@ -21,6 +21,10 @@ pub enum CcdmError {
     /// Never retried automatically — resuming is the user's choice.
     #[error("download cancelled")]
     Cancelled,
+    /// Media (HLS/DASH) shape we do not support yet (encrypted streams,
+    /// live manifests, unknown segment schemes). Never retried.
+    #[error("unsupported media: {0}")]
+    Unsupported(String),
     /// Anything else (config, state file, ...).
     #[error("{0}")]
     Other(String),
@@ -36,7 +40,7 @@ impl CcdmError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Http(_) | Self::Io(_) | Self::Other(_) => true,
-            Self::InvalidUrl(_) | Self::RangeNotSupported | Self::Cancelled => false,
+            Self::InvalidUrl(_) | Self::RangeNotSupported | Self::Cancelled | Self::Unsupported(_) => false,
         }
     }
 }

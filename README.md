@@ -5,11 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.5 = live GPUI queue (progress bars, start / pause / resume / retry /
-> remove, add-from-clipboard), in-GUI speed + connections + organize controls,
-> categories folders, folder reveal + re-download, persisted queue + config
-> shared with the CLI. XDM concepts keep getting ported module by module
-> (see map below).
+> v0.6 = HLS (m3u8) + DASH (mpd) downloads: dependency-free playlist
+> parsers, best-rendition picking, `.ts`/`.mp4` output, auto-dispatch for
+> playlist URLs in CLI and GUI, media hint in `probe`.
 
 ## What works today
 
@@ -29,6 +27,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 
 **Engine (`ccdm-core`)**
 - Segmented multi-connection HTTP with per-part resume + stale-part repair
+- HLS + DASH: playlist parsing, best rendition, `.ts`/`.mp4` assembly
 - Global speed cap enforced across all segments, proxy support
 - Filename guessing + sanitizing, categories + `resolve_dest()` folders
 - JSON config + versioned JSON queue store
@@ -36,7 +35,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media (HLS/DASH)
 crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
 .github/workflows  CI: fmt + clippy + test, then release builds per OS
@@ -60,9 +59,10 @@ port its *concepts* clean-room (no copied code):
 | File-name helpers, categories folders | `model::{guess_file_name, sanitize_file_name, resolve_dest}` |
 | Transient-vs-fatal failures | `CcdmError::is_transient` + 3-attempt backoff in CLI `start` |
 | Progressive/adaptive HTTP downloaders | `http::{probe, download_with_resume, download_segmented}` |
+| HLS/DASH, `MediaParser` | `media::{parse_master, parse_media, parse_mpd, download_media, download_auto}` (encrypted HLS + live MPD refused with `Unsupported`) |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
-Still to port: HLS/DASH parsers, `MediaParser`, FFmpeg wrapper, browser
+Still to port: FFmpeg wrapper, browser
 native-messaging host + extensions, clipboard monitor, scheduler
 (`DownloadSchedule`), updater, translations, themes.
 
@@ -123,7 +123,7 @@ downloads into `Video/`, `Documents/`, … subfolders. **Speed** and
 - [x] Live engine ↔ GPUI wiring (progress bars, pause/resume buttons)
 - [x] In-GUI speed-limit control + per-download connection setting
 - [x] Categories folders, finished-file actions (open folder, re-download)
-- [ ] HLS (m3u8) + DASH (mpd) downloaders
+- [x] HLS (m3u8) + DASH (mpd) downloaders
 - [ ] Browser integration (native-messaging host + extension)
 - [ ] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [ ] Video probe/convert via system ffmpeg, updater, translations
