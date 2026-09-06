@@ -8,6 +8,7 @@
 
 use serde_json::Value;
 
+use crate::convert::ffmpeg_binary;
 use crate::{CcdmError, Result};
 
 /// Watch-page hosts we hand to yt-dlp instead of probing as files.
@@ -94,7 +95,7 @@ impl ResolvedMedia {
     }
 }
 
-/// Locate the yt-dlp binary: configured path first, else PATH probe.
+/// Locate the yt-dlp binary: configured path, tools dir, then PATH probe.
 pub fn find_ytdlp(configured: Option<&str>) -> Option<String> {
     if let Some(path) = configured.map(str::trim).filter(|s| !s.is_empty()) {
         if std::path::Path::new(path).exists() {
@@ -105,6 +106,12 @@ pub fn find_ytdlp(configured: Option<&str>) -> Option<String> {
             return Some(path.to_string());
         }
         return None;
+    }
+    if let Some(dir) = crate::convert::tools_dir() {
+        let candidate = dir.join(ytdlp_asset());
+        if candidate.is_file() {
+            return Some(candidate.display().to_string());
+        }
     }
     ["yt-dlp", "yt-dlp.exe"]
         .into_iter()
@@ -118,6 +125,108 @@ fn probe_ytdlp(binary: &str) -> bool {
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
+}
+
+/// Release asset filename for this platform.
+pub fn ytdlp_asset() -> &'static str {
+    if cfg!(windows) {
+        "yt-dlp.exe"
+    } else if cfg!(target_os = "macos") {
+        "yt-dlp_macos"
+    } else {
+        "yt-dlp"
+    }
+}
+
+/// GitHub `latest` download URL for the platform asset (redirects included).
+pub fn ytdlp_download_url() -> String {
+    format!(
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/{}",
+        ytdlp_asset()
+    )
+}
+
+/// ffmpeg zip URL where auto-setup is supported (Windows only for now —
+/// elsewhere install via apt/brew).
+pub fn ffmpeg_download_url() -> Option<&'static str> {
+    if cfg!(windows) {
+        Some("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip")
+    } else {
+        None
+    }
+}
+
+/// Download the yt-dlp binary into the tools dir (replaces any stale copy).
+pub async fn setup_ytdlp<F>(client: &reqwest::Client, progress: F) -> Result<std::path::PathBuf>
+where
+    F: Fn(u64, Option<u64>) + Send + Sync,
+{
+    let dir = crate::convert::tools_dir()
+        .ok_or_else(|| CcdmError::Other("no config dir on this platform".to_string()))?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(CcdmError::from)?;
+    let dest = dir.join(ytdlp_asset());
+    let _ = tokio::fs::remove_file(&dest).await;
+    crate::http::download_with_resume(client, &ytdlp_download_url(), &dest, None, None, progress)
+        .await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
+            .map_err(CcdmError::from)?;
+    }
+    Ok(dest)
+}
+
+/// Download the ffmpeg zip and extract `ffmpeg(.exe)` into the tools dir.
+pub async fn setup_ffmpeg<F>(client: &reqwest::Client, progress: F) -> Result<std::path::PathBuf>
+where
+    F: Fn(u64, Option<u64>) + Send + Sync,
+{
+    let url = ffmpeg_download_url().ok_or_else(|| {
+        CcdmError::Other(
+            "automatic ffmpeg setup is Windows-only — install via apt/brew".to_string(),
+        )
+    })?;
+    let dir = crate::convert::tools_dir()
+        .ok_or_else(|| CcdmError::Other("no config dir on this platform".to_string()))?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(CcdmError::from)?;
+    let zip_path = dir.join("ffmpeg.zip");
+    let _ = tokio::fs::remove_file(&zip_path).await;
+    crate::http::download_with_resume(client, url, &zip_path, None, None, progress).await?;
+    let data = tokio::fs::read(&zip_path)
+        .await
+        .map_err(CcdmError::from)?;
+    let exe = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+        let cursor = std::io::Cursor::new(data);
+        let mut archive = zip::ZipArchive::new(cursor)
+            .map_err(|e| CcdmError::Other(format!("bad ffmpeg zip: {e}")))?;
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| CcdmError::Other(e.to_string()))?;
+            if !file.is_dir() && file.name().ends_with("bin/ffmpeg.exe") {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut file, &mut buf)
+                    .map_err(CcdmError::from)?;
+                return Ok(buf);
+            }
+        }
+        Err(CcdmError::Other(
+            "ffmpeg.exe not found in archive".to_string(),
+        ))
+    })
+    .await
+    .map_err(|e| CcdmError::Other(format!("extract task failed: {e}")))??;
+    let dest = dir.join("ffmpeg.exe");
+    tokio::fs::write(&dest, &exe)
+        .await
+        .map_err(CcdmError::from)?;
+    let _ = tokio::fs::remove_file(&zip_path).await;
+    Ok(dest)
 }
 
 /// Parse `--dump-single-json` output into [`ResolvedMedia`].
@@ -190,7 +299,10 @@ pub fn resolve(ytdlp: &str, url: &str, format_spec: &str) -> Result<ResolvedMedi
 
 /// Mux separate video+audio files (stream copy, no re-encode).
 pub fn mux_av(video: &std::path::Path, audio: &std::path::Path, output: &std::path::Path) -> Result<()> {
-    let status = std::process::Command::new("ffmpeg")
+    let ffmpeg = ffmpeg_binary().ok_or_else(|| {
+        CcdmError::Other("ffmpeg not found — Setup video tools or install it".to_string())
+    })?;
+    let status = std::process::Command::new(&ffmpeg)
         .args([
             "-y",
             "-i",

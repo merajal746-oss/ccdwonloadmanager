@@ -18,7 +18,7 @@ use std::sync::{
 use std::time::Duration;
 
 use gpui::{
-    App, Application, Bounds, Context, MouseButton, SharedString, Window, WindowBounds,
+    App, Application, Bounds, Context, Div, MouseButton, SharedString, Window, WindowBounds,
     WindowOptions, div, prelude::*, px, rgb, size,
 };
 
@@ -28,6 +28,13 @@ use ccdm_core::{
     AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, Schedule, SharedLimiter,
     SpeedLimiter, Store, http, i18n, media,
 };
+
+/// Which page the window shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Queue,
+    Settings,
+}
 
 /// Engine-side state of one row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +125,7 @@ struct RowView {
 enum UiEvent {
     AddRow(Worker),
     Notice(String),
+    SetupDone { ytdlp_path: String, message: String },
 }
 
 /// Fingerprint used to persist only on real state changes.
@@ -137,14 +145,18 @@ fn new_id(n: usize) -> String {
 const SPEED_STEPS: &[u32] = &[0, 256, 512, 1024, 2048, 5120, 10240];
 /// Per-download connection steps cycled by the toolbar button.
 const CONN_STEPS: &[usize] = &[1, 2, 4, 8, 16, 32];
-fn speed_label(lang: &str, config: &AppConfig) -> String {
-    let value = if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
+fn speed_value(lang: &str, config: &AppConfig) -> String {
+    if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
         i18n::t(lang, "tb.unlimited")
     } else if config.speed_limit_kbps >= 1024 {
         format!("{:.1} MiB/s", config.speed_limit_kbps as f32 / 1024.0)
     } else {
         format!("{} KiB/s", config.speed_limit_kbps)
-    };
+    }
+}
+
+fn speed_label(lang: &str, config: &AppConfig) -> String {
+    let value = speed_value(lang, config);
     i18n::format(lang, "tb.speed", &[("v", &value)])
 }
 
@@ -177,6 +189,10 @@ fn sched_label(lang: &str, config: &AppConfig) -> String {
 
 fn shutdown_label(lang: &str, config: &AppConfig) -> String {
     i18n::format(lang, "tb.shutdown", &[("v", &on_off(lang, config.shutdown_after_queue))])
+}
+
+fn quality_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(lang, "tb.quality", &[("v", &config.video_quality)])
 }
 
 fn quality_label(lang: &str, config: &AppConfig) -> String {
@@ -260,6 +276,24 @@ fn button(
         .child(label)
 }
 
+/// Settings-screen button dispatching to a view method by fn pointer.
+fn settings_button(
+    cx: &mut Context<DownloadManager>,
+    theme: Theme,
+    label: String,
+    bg: u32,
+    action: fn(&mut DownloadManager, &mut Context<DownloadManager>),
+) -> impl IntoElement {
+    button(
+        theme,
+        label,
+        bg,
+        cx.listener(move |this, _event, _window, cx| {
+            action(this, cx);
+        }),
+    )
+}
+
 /// Blocking worker: probe is already done, download to `dest` with resume.
 fn run_download(
     worker: Worker,
@@ -340,6 +374,7 @@ struct DownloadManager {
     saved: HashMap<String, String>,
     store_mtime: Option<std::time::SystemTime>,
     last_clipboard: String,
+    screen: Screen,
 }
 
 impl DownloadManager {
@@ -456,6 +491,7 @@ impl DownloadManager {
             saved,
             store_mtime: None,
             last_clipboard: String::new(),
+            screen: Screen::Queue,
         }
     }
 
@@ -511,6 +547,7 @@ impl DownloadManager {
             self.config.speed_limit_kbps,
             self.config.enable_speed_limit,
         );
+        self.refresh_config_summary();
         self.save_config();
         cx.notify();
     }
@@ -522,6 +559,7 @@ impl DownloadManager {
             .position(|&c| c == self.config.max_connections)
             .unwrap_or(3);
         self.config.max_connections = CONN_STEPS[(pos + 1) % CONN_STEPS.len()];
+        self.refresh_config_summary();
         self.save_config();
         cx.notify();
     }
@@ -575,6 +613,122 @@ impl DownloadManager {
         };
         self.save_config();
         cx.notify();
+    }
+
+    fn toggle_screen(&mut self, cx: &mut Context<Self>) {
+        self.screen = match self.screen {
+            Screen::Queue => Screen::Settings,
+            Screen::Settings => Screen::Queue,
+        };
+        cx.notify();
+    }
+
+    fn cycle_lang(&mut self, cx: &mut Context<Self>) {
+        let langs = ccdm_core::i18n::available_langs();
+        let pos = langs
+            .iter()
+            .position(|l| *l == self.config.language)
+            .unwrap_or(0);
+        self.config.language = langs[(pos + 1) % langs.len()].clone();
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Pick the download folder with a native dialog.
+    fn browse_download_dir(&mut self, cx: &mut Context<Self>) {
+        let start = self.config.download_dir.clone();
+        if let Some(dir) = rfd::FileDialog::new().set_directory(start).pick_folder() {
+            self.config.download_dir = dir;
+            self.refresh_config_summary();
+            self.save_config();
+        }
+        cx.notify();
+    }
+
+    /// Reveal the download folder in the file manager.
+    fn open_download_dir(&mut self, cx: &mut Context<Self>) {
+        if let Err(e) = open::that(&self.config.download_dir) {
+            self.notice =
+                i18n::format(&self.config.language, "n.reveal", &[("e", &e.to_string())]);
+        }
+        cx.notify();
+    }
+
+    /// Open config.json in the default editor (creates it first if needed).
+    fn open_config_file(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        match AppConfig::config_path() {
+            Some(path) => {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if !path.exists() {
+                    let _ = self.config.save(&path);
+                }
+                if let Err(e) = open::that(&path) {
+                    self.notice = i18n::format(&lang, "n.reveal", &[("e", &e.to_string())]);
+                }
+            }
+            None => self.notice = i18n::t(&lang, "n.no_cfgdir"),
+        }
+        cx.notify();
+    }
+
+    /// Download yt-dlp (+ffmpeg on Windows) in a worker thread.
+    fn setup_video_tools(&mut self, cx: &mut Context<Self>) {
+        let tx = self.tx.clone();
+        let lang = self.config.language.clone();
+        self.notice = i18n::t(&lang, "n.setup");
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let result = match runtime {
+                Err(e) => Err(format!("runtime error: {e}")),
+                Ok(runtime) => runtime.block_on(async {
+                    let client = ccdm_core::http::build_client()
+                        .map_err(|e| format!("http engine failed: {e}"))?;
+                    let path = ccdm_core::video::setup_ytdlp(&client, |_, _| {})
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    if let Err(e) =
+                        ccdm_core::video::setup_ffmpeg(&client, |_, _| {}).await
+                    {
+                        eprintln!("ffmpeg setup skipped: {e}");
+                    }
+                    Ok::<_, String>(path.display().to_string())
+                }),
+            };
+            match result {
+                Ok(path) => {
+                    let _ = tx.send(UiEvent::SetupDone {
+                        ytdlp_path: path.clone(),
+                        message: i18n::format(&lang, "n.setup_ok", &[("v", &path)]),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(UiEvent::Notice(i18n::format(
+                        &lang,
+                        "n.setup_fail",
+                        &[("e", &e)],
+                    )));
+                }
+            }
+        });
+        cx.notify();
+    }
+
+    fn refresh_config_summary(&mut self) {
+        let cap = if self.config.enable_speed_limit && self.config.speed_limit_kbps > 0 {
+            format!("cap {} KiB/s", self.config.speed_limit_kbps)
+        } else {
+            "no speed cap".to_string()
+        };
+        self.config_summary = format!(
+            "dir: {} | {} conn | {cap}",
+            self.config.download_dir.display(),
+            self.config.max_connections,
+        );
     }
 
     fn cycle_quality(&mut self, cx: &mut Context<Self>) {
@@ -941,6 +1095,11 @@ impl DownloadManager {
                 UiEvent::Notice(message) => {
                     self.notice = message;
                 }
+                UiEvent::SetupDone { ytdlp_path, message } => {
+                    self.config.ytdlp_path = Some(ytdlp_path);
+                    self.save_config();
+                    self.notice = message;
+                }
             }
         }
     }
@@ -1004,6 +1163,40 @@ impl DownloadManager {
 
 impl Render for DownloadManager {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match self.screen {
+            Screen::Queue => self.render_queue(cx),
+            Screen::Settings => self.render_settings(cx),
+        }
+    }
+}
+
+/// One settings row: translated name, current value, action buttons.
+fn setting_row(
+    theme: Theme,
+    label: String,
+    value: String,
+    actions: Vec<impl IntoElement>,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .px_3()
+        .py_2()
+        .bg(rgb(theme.card))
+        .rounded_lg()
+        .child(div().text_xs().text_color(rgb(theme.dim)).child(label))
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .child(div().flex_1().text_sm().truncate().child(value))
+                .child(div().flex().gap_2().children(actions)),
+        )
+}
+
+impl DownloadManager {
+    fn render_queue(&mut self, cx: &mut Context<Self>) -> Div {
         let lang = self.config.language.clone();
         let total = self.rows.len();
         let active = self.rows.iter().filter(|row| row.running).count();
@@ -1062,7 +1255,13 @@ impl Render for DownloadManager {
                             .text_sm()
                             .text_color(rgb(theme.warn))
                             .child(self.notice.clone()),
-                    ),
+                    )
+                    .child(button(
+                        theme,
+                        i18n::t(&lang, "tb.settings"),
+                        theme.muted,
+                        cx.listener(|this, _event, _window, cx| this.toggle_screen(cx)),
+                    )),
             )
             .child(
                 div()
@@ -1310,6 +1509,194 @@ impl Render for DownloadManager {
                 ))
             })
     }
+
+    fn render_settings(&mut self, cx: &mut Context<Self>) -> Div {
+        let lang = self.config.language.clone();
+        let theme = self.theme;
+        let tools_value = format!(
+            "yt-dlp {} • ffmpeg {}",
+            ccdm_core::video::find_ytdlp(self.config.ytdlp_path.as_deref())
+                .unwrap_or_else(|| "—".to_string()),
+            ccdm_core::convert::ffmpeg_binary().unwrap_or_else(|| "—".to_string())
+        );
+        let config_path = AppConfig::config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "—".to_string());
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .bg(rgb(theme.bg))
+            .size_full()
+            .p_4()
+            .text_color(rgb(theme.text))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.back"),
+                        theme.muted,
+                        Self::toggle_screen,
+                    ))
+                    .child(div().flex_1().text_xl().child(i18n::t(&lang, "set.title"))),
+            )
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.folder"),
+                self.config.download_dir.display().to_string(),
+                vec![
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.browse"),
+                        theme.primary,
+                        Self::browse_download_dir,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.open"),
+                        theme.muted,
+                        Self::open_download_dir,
+                    ),
+                ],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.speed"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    speed_label(&lang, &self.config),
+                    theme.muted,
+                    Self::cycle_speed,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.connections"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    connections_label(&lang, &self.config),
+                    theme.muted,
+                    Self::cycle_conns,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.quality"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    quality_label(&lang, &self.config),
+                    theme.muted,
+                    Self::cycle_quality,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.language"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    self.config.language.clone(),
+                    theme.muted,
+                    Self::cycle_lang,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.organize"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    on_off(&lang, self.config.organize_by_category),
+                    theme.muted,
+                    Self::toggle_organize,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.monitor"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    on_off(&lang, self.config.clipboard_monitor),
+                    theme.muted,
+                    Self::toggle_monitor,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.shutdown"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    on_off(&lang, self.config.shutdown_after_queue),
+                    theme.muted,
+                    Self::toggle_shutdown,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.theme"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    on_off(&lang, self.config.dark_mode),
+                    theme.muted,
+                    Self::toggle_theme,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.sched"),
+                String::new(),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    sched_label(&lang, &self.config),
+                    theme.muted,
+                    Self::toggle_sched,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.video"),
+                tools_value,
+                vec![settings_button(
+                    cx,
+                    theme,
+                    i18n::t(&lang, "tb.setup_video"),
+                    theme.primary,
+                    Self::setup_video_tools,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.advanced"),
+                config_path,
+                vec![settings_button(
+                    cx,
+                    theme,
+                    i18n::t(&lang, "tb.edit_file"),
+                    theme.muted,
+                    Self::open_config_file,
+                )],
+            ))
+    }
 }
 
 fn main() {
@@ -1325,7 +1712,7 @@ fn main() {
     });
     let limiter = SpeedLimiter::shared(config.speed_limit_kbps, config.enable_speed_limit);
     Application::new().run(move |cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(720.), px(520.)), cx);
+        let bounds = Bounds::centered(None, size(px(780.), px(640.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

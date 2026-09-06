@@ -5,9 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.10 = YouTube-style video downloads via yt-dlp (like XDM's YDLWrapper):
-> watch-page auto-resolve in the GUI, quality picker, `video` CLI command
-> with ffmpeg muxing. Direct media links keep using the engine as before.
+> v0.11 = one-click video setup (yt-dlp + ffmpeg auto-install, no yt-dlp
+> crate — see license note), ultimate Settings screen (every option clickable,
+> folder picker, config editor shortcut), baby-easy empty states.
 
 ## What works today
 
@@ -72,7 +72,7 @@ port its *concepts* clean-room (no copied code):
 | Video converter | `convert::{convert, ConvertTarget}` via system ffmpeg (`convert`, GUI MP3) |
 | Updater | `update::{latest_release, is_newer}` (`update-check`, GUI notice) |
 | Translations | `i18n::{t, format, load_file}` — embedded English + `lang/*.json` |
-| Video pages (YDL) | `video::{is_video_page, resolve, mux_av}` via yt-dlp; CLI `video`, GUI auto-resolve |
+| Video pages (YDL) | `video::{is_video_page, resolve, mux_av, setup_ytdlp, setup_ffmpeg}` via yt-dlp binary; CLI `video`/`setup`, GUI auto-resolve |
 | Themes/skins | GUI `Theme` (dark/light toggle) |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
@@ -80,6 +80,12 @@ Known limits (not yet done): DASH multi-audio muxing, SQLite named queues,
 in-GUI text input, per-row connection override, encrypted HLS, live DASH.
 
 License: **GPL-2.0-only** (compatible with XDM's GPL-2.0). See `LICENSE`.
+
+> Why no `yt-dlp` Rust crate (v2.8.3)? It is **GPL-3.0**, which cannot link
+> into this GPL-2.0-only codebase — and it downloads by itself, bypassing
+> our engine (pause / speed cap / queue). Instead ccdM shells out to the
+> yt-dlp *binary* (same as XDM's YDLWrapper) and auto-installs it, keeping
+> every download inside the engine.
 
 ## No-local-Rust workflow
 
@@ -117,6 +123,7 @@ ccdm-cli convert <file> [--to mp3|mp4]
 ccdm-cli update-check [--repo owner/name]
 ccdm-cli lang [--set CODE]
 ccdm-cli video <watch-URL> [--output out.mp4] [--quality best|1080p|720p|480p|audio]
+ccdm-cli setup   # auto-install yt-dlp (+ffmpeg on Windows), registers it
 ```
 
 Config lives in `<config-dir>/ccdm/config.json`, the queue in
@@ -166,3 +173,4 @@ normally. **Speed** and
 - [x] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [x] Video probe/convert via system ffmpeg, updater, translations, themes
 - [x] YouTube-style video pages via yt-dlp (CLI `video`, GUI auto-resolve)
+- [x] One-click dependency setup + ultimate Settings screen

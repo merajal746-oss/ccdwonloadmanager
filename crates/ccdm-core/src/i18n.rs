@@ -36,6 +36,27 @@ pub fn lang_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("ccdm").join("lang"))
 }
 
+/// Language codes with a file, English first.
+pub fn available_langs() -> Vec<String> {
+    let mut langs = vec![DEFAULT_LANG.to_string()];
+    if let Some(dir) = lang_dir() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Some(code) = path.file_stem().and_then(|s| s.to_str()) {
+                    if code != DEFAULT_LANG && !langs.iter().any(|l| l == code) {
+                        langs.push(code.to_string());
+                    }
+                }
+            }
+        }
+    }
+    langs
+}
+
 /// Load every `<code>.json` in [`lang_dir`]; returns files loaded.
 pub fn load_available() -> usize {
     let Some(dir) = lang_dir() else {
@@ -113,6 +134,31 @@ fn en(key: &str) -> Option<&'static str> {
         "tb.shutdown" => "Shutdown: {v}",
         "tb.theme" => "Theme: {v}",
         "tb.quality" => "Quality: {v}",
+        "tb.settings" => "Settings",
+        "tb.back" => "Back",
+        "tb.change" => "Change",
+        "tb.browse" => "Browse",
+        "tb.open" => "Open",
+        "tb.edit_file" => "Edit file",
+        "tb.setup_video" => "Setup video",
+        "set.title" => "Settings",
+        "set.folder" => "Download folder",
+        "set.speed" => "Speed limit",
+        "set.connections" => "Connections",
+        "set.quality" => "Video quality",
+        "set.language" => "Language",
+        "set.organize" => "Sort into category folders",
+        "set.monitor" => "Watch clipboard for links",
+        "set.shutdown" => "Shut down when queue finishes",
+        "set.theme" => "Dark theme",
+        "set.sched" => "Download schedule",
+        "set.video" => "Video tools",
+        "set.advanced" => "Advanced (proxy, paths, schedule times live in config.json)",
+        "n.setup" => "setting up video tools…",
+        "n.setup_ok" => "video ready: {v}",
+        "n.setup_fail" => "video setup failed: {e}",
+        "c.setup_dl" => "downloading {what}…",
+        "c.setup_ok" => "ready: {path}",
         "tb.unlimited" => "unlimited",
         "cm.on" => "on",
         "cm.off" => "off",

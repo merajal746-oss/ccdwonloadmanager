@@ -33,13 +33,37 @@ impl ConvertTarget {
     }
 }
 
-/// Whether `ffmpeg` runs (probed once per call — cheap enough for UI use).
-pub fn ffmpeg_available() -> bool {
-    std::process::Command::new("ffmpeg")
+/// `<config>/ccdm/bin` — home for auto-installed helpers.
+pub fn tools_dir() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("ccdm").join("bin"))
+}
+
+fn probe_binary(binary: &str) -> bool {
+    std::process::Command::new(binary)
         .arg("-version")
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
+}
+
+/// ffmpeg binary: tools dir first (auto-setup), then PATH.
+pub fn ffmpeg_binary() -> Option<String> {
+    if let Some(dir) = tools_dir() {
+        let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate.display().to_string());
+        }
+    }
+    ["ffmpeg", "ffmpeg.exe"]
+        .into_iter()
+        .find(|bin| probe_binary(bin))
+        .map(str::to_string)
+}
+
+/// Whether `ffmpeg` runs (probed once per call — cheap enough for UI use).
+pub fn ffmpeg_available() -> bool {
+    ffmpeg_binary().is_some()
 }
 
 /// Output path next to `input` with the target extension.
@@ -61,11 +85,9 @@ pub fn convertible_to_mp3(file_name: &str) -> bool {
 
 /// Convert `input` to `target` beside it; returns the output path.
 pub fn convert(input: &Path, target: ConvertTarget) -> Result<PathBuf> {
-    if !ffmpeg_available() {
-        return Err(CcdmError::Other(
-            "ffmpeg not found on PATH — install it to convert media".to_string(),
-        ));
-    }
+    let ffmpeg = ffmpeg_binary().ok_or_else(|| {
+        CcdmError::Other("ffmpeg not found — Setup video tools or install it".to_string())
+    })?;
     let output = output_path(input, target);
     let mut args: Vec<String> = vec![
         "-y".to_string(),
@@ -81,7 +103,7 @@ pub fn convert(input: &Path, target: ConvertTarget) -> Result<PathBuf> {
         ConvertTarget::Mp4 => args.extend(["-c", "copy"].iter().map(|s| s.to_string())),
     }
     args.push(output.display().to_string());
-    let result = std::process::Command::new("ffmpeg")
+    let result = std::process::Command::new(&ffmpeg)
         .args(&args)
         .output()
         .map_err(CcdmError::from)?;

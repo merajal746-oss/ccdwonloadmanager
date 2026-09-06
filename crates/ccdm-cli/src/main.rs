@@ -113,6 +113,8 @@ enum Commands {
         #[arg(short, long, default_value = "best")]
         quality: String,
     },
+    /// Download yt-dlp (+ffmpeg on Windows) so video pages just work.
+    Setup,
 }
 
 /// Stable-enough unique id without extra dependencies.
@@ -661,6 +663,46 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 anyhow::bail!("{}", i18n::t(&lang, "c.yt_nostreams"));
             }
+        }
+        Commands::Setup => {
+            use ccdm_core::video;
+            let (_got, _total, progress) = make_progress();
+            eprintln!(
+                "{}",
+                i18n::format(&lang, "c.setup_dl", &[("what", "yt-dlp")])
+            );
+            let path = video::setup_ytdlp(&client, progress)
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            config.ytdlp_path = Some(path.display().to_string());
+            let (_got, _total, progress) = make_progress();
+            match video::setup_ffmpeg(&client, progress).await {
+                Ok(ffmpeg) => eprintln!(
+                    "{}",
+                    i18n::format(
+                        &lang,
+                        "c.setup_ok",
+                        &[("path", &ffmpeg.display().to_string())]
+                    )
+                ),
+                Err(e) => eprintln!("ffmpeg: {e}"),
+            }
+            match AppConfig::config_path() {
+                Some(path) => {
+                    config
+                        .save(&path)
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                }
+                None => eprintln!("no config dir; yt-dlp left unregistered"),
+            }
+            println!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.setup_ok",
+                    &[("path", &config.ytdlp_path.clone().unwrap_or_default())]
+                )
+            );
         }
     }
     Ok(())
