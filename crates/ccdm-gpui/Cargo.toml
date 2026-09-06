@@ -16,3 +16,6 @@ open = "5"
 reqwest = "0.13.4"
 rfd = "0.17"
 tokio = { version = "1.53.1", features = ["rt", "time"] }
+
+[build-dependencies]
+embed-resource = "2"

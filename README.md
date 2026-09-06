@@ -48,6 +48,8 @@ crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
 crates/ccdm-host   browser native-messaging host (--stdio/install/manifest)
 ext/               MV3 bridge extension (chrome + firefox) + install guide
+assets/            logo.svg (single source of truth) + rendered icon.ico
+tools/             render_icons.py (SVG → PNG/ICO via headless browser)
 .github/workflows  CI: fmt + clippy + test, then release builds per OS
 ```
 
@@ -166,6 +168,20 @@ in-browser and queued in ccdM instead — the GUI imports them live, and
 `ccdm-cli list` shows them too. Without the host, the browser downloads
 normally. **Speed** and
 **Connections** apply to newly started downloads.
+
+## Logo & icons
+
+`assets/logo.svg` is the single source of truth (Chrome rejects SVG
+extension icons, so PNGs are rendered from it):
+
+- **Desktop icon**: CI renders `icon.ico` (16→256px) from the SVG and the
+  Windows `ccdm-gpui.exe` embeds it via `build.rs`. No local tools needed.
+- **Extension logo**: the `icons` workflow renders `icon16/48/128.png`
+  into `ext/chrome/icons` + `ext/firefox/icons` and commits them back
+  (bot pushes don't retrigger CI). Right after pushing logo changes, the
+  extension briefly misses its PNGs until that commit lands (~2 min).
+- Re-render locally any time: `python tools/render_icons.py --svg
+  assets/logo.svg --outdir <dir>` (needs Chrome/Edge/Firefox + python3).
 
 ## Roadmap
 

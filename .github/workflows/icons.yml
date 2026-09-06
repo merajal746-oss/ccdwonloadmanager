@@ -1,0 +1,37 @@
+name: icons
+
+# Renders assets/logo.svg into extension PNGs and commits them back.
+# Runs when the logo changes (or manually). Bot pushes do not retrigger CI.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "assets/logo.svg"
+      - "ext/**/manifest.json"
+      - ".github/workflows/icons.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: render PNGs
+        run: |
+          python3 tools/render_icons.py --svg assets/logo.svg --outdir /tmp/ccdm-icons
+          mkdir -p ext/chrome/icons ext/firefox/icons
+          for s in 16 48 128; do
+            cp /tmp/ccdm-icons/icon-$s.png ext/chrome/icons/icon$s.png
+            cp /tmp/ccdm-icons/icon-$s.png ext/firefox/icons/icon$s.png
+          done
+          cp /tmp/ccdm-icons/icon-128.png assets/logo-128.png
+      - name: commit icons
+        run: |
+          git config user.name "ccdm icons bot"
+          git config user.email "icons@localhost"
+          git add ext/chrome/icons ext/firefox/icons assets/logo-128.png
+          git diff --cached --quiet || git commit -m "assets: render extension icons from logo.svg"
+          git push

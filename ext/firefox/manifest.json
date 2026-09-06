@@ -7,6 +7,19 @@
   "background": {
     "scripts": ["background.js"]
   },
+  "action": {
+    "default_title": "ccDM Bridge — downloads go to ccdwonloadmanager",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "ccdm-bridge@example.com"
