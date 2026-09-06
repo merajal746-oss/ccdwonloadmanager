@@ -10,7 +10,7 @@ fn main() {
         println!("cargo:rerun-if-changed=assets/app.rc");
         println!("cargo:rerun-if-changed=assets/icon.ico");
         if std::path::Path::new("assets/icon.ico").exists() {
-            embed_resource::compile("assets/app.rc");
+            embed_resource::compile("assets/app.rc", embed_resource::NONE);
         } else {
             println!("cargo:warning=assets/icon.ico missing, building without embedded icon");
         }
