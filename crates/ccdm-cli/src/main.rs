@@ -18,12 +18,11 @@ use std::sync::{
 };
 
 use anyhow::Context;
-use clap::{Parser, Subcommands};
+use clap::{Parser, Subcommand};
 
 use ccdm_core::convert::ConvertTarget;
 use ccdm_core::i18n;
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
-use ccdm_core::update;
 use ccdm_core::{
     http, media, AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter,
     Store,
@@ -40,7 +39,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Debug, Subcommands)]
+#[derive(Debug, Subcommand)]
 enum Commands {
     /// Show what the server advertises (size, name, range support).
     Probe {
