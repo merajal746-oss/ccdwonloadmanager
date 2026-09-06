@@ -17,6 +17,10 @@ pub enum CcdmError {
     /// Server ignored our `Range` request; resume/segmenting is impossible.
     #[error("server does not support range requests")]
     RangeNotSupported,
+    /// Cooperative stop via [`CancelFlag`](crate::CancelFlag) (pause button).
+    /// Never retried automatically — resuming is the user's choice.
+    #[error("download cancelled")]
+    Cancelled,
     /// Anything else (config, state file, ...).
     #[error("{0}")]
     Other(String),
@@ -32,7 +36,7 @@ impl CcdmError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Http(_) | Self::Io(_) | Self::Other(_) => true,
-            Self::InvalidUrl(_) | Self::RangeNotSupported => false,
+            Self::InvalidUrl(_) | Self::RangeNotSupported | Self::Cancelled => false,
         }
     }
 }

@@ -21,7 +21,7 @@ use tokio::io::AsyncWriteExt;
 use crate::model::guess_file_name;
 use crate::segmented::plan_segments;
 use crate::speed_limiter::SharedLimiter;
-use crate::{CcdmError, Result};
+use crate::{CancelFlag, CcdmError, Result};
 
 /// Build the shared HTTP client with default settings.
 pub fn build_client() -> Result<reqwest::Client> {
@@ -133,12 +133,14 @@ pub async fn probe(client: &reqwest::Client, url: &str) -> Result<ProbeResult> {
 /// (via `Range`). When the server answers `200` instead of `206` the
 /// partial file is discarded and the download restarts from zero.
 /// `progress(downloaded, total)` is called after every chunk; `limiter`,
-/// when present, enforces the global speed cap (cf. XDM SpeedLimiter).
+/// when present, enforces the global speed cap (cf. XDM SpeedLimiter);
+/// `cancel`, when present, aborts at the next chunk boundary (pause).
 pub async fn download_with_resume<F>(
     client: &reqwest::Client,
     url: &str,
     dest: &Path,
     limiter: Option<SharedLimiter>,
+    cancel: Option<CancelFlag>,
     progress: F,
 ) -> Result<()>
 where
@@ -186,6 +188,9 @@ where
     let mut stream = resp.bytes_stream();
     while let Some(item) = stream.next().await {
         let bytes = item.map_err(CcdmError::from)?;
+        if let Some(flag) = &cancel {
+            flag.check()?;
+        }
         file.write_all(&bytes).await.map_err(CcdmError::from)?;
         downloaded += bytes.len() as u64;
         progress(downloaded, total);
@@ -210,6 +215,7 @@ pub async fn download_segmented<F>(
     dest: &Path,
     segments: usize,
     limiter: Option<SharedLimiter>,
+    cancel: Option<CancelFlag>,
     progress: F,
 ) -> Result<()>
 where
@@ -219,7 +225,15 @@ where
     let total = match info.total_bytes {
         Some(t) if t > 0 && info.supports_ranges && segments > 1 => t,
         _ => {
-            return download_with_resume(client, &info.final_url, dest, limiter, progress).await;
+            return download_with_resume(
+                client,
+                &info.final_url,
+                dest,
+                limiter,
+                cancel,
+                progress,
+            )
+            .await;
         }
     };
 
@@ -255,6 +269,7 @@ where
         let progress = Arc::clone(&progress);
         let downloaded = Arc::clone(&downloaded);
         let limiter = limiter.clone();
+        let cancel = cancel.clone();
         handles.push(tokio::spawn(async move {
             fetch_range(
                 &client,
@@ -264,6 +279,7 @@ where
                 end,
                 total,
                 limiter,
+                cancel,
                 &progress,
                 &downloaded,
             )
@@ -275,6 +291,9 @@ where
             .map_err(|e| CcdmError::Other(format!("segment task panicked: {e}")))??;
     }
 
+    if let Some(flag) = &cancel {
+        flag.check()?;
+    }
     assemble_parts(dest, ranges.len()).await?;
     progress(total, Some(total));
     Ok(())
@@ -290,6 +309,7 @@ async fn fetch_range(
     end: u64,
     total: u64,
     limiter: Option<SharedLimiter>,
+    cancel: Option<CancelFlag>,
     progress: &dyn Fn(u64, Option<u64>) + Send + Sync,
     downloaded: &AtomicU64,
 ) -> Result<()> {
@@ -325,6 +345,9 @@ async fn fetch_range(
     let mut stream = resp.bytes_stream();
     while let Some(item) = stream.next().await {
         let bytes = item.map_err(CcdmError::from)?;
+        if let Some(flag) = &cancel {
+            flag.check()?;
+        }
         file.write_all(&bytes).await.map_err(CcdmError::from)?;
         let now =
             downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;

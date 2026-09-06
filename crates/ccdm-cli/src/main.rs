@@ -131,6 +131,7 @@ async fn run_with_retry(
             dest,
             segments,
             limiter.clone(),
+            None,
             progress.clone(),
         )
         .await;
@@ -220,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
                 &dest,
                 segments,
                 limiter,
+                None,
                 progress,
             )
             .await

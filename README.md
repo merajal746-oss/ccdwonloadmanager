@@ -5,17 +5,18 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.2 = persisted queue + `add`/`list`/`start` CLI, global speed cap wired
-> into downloads, transient-error retries, filename sanitizing, proxy support.
+> v0.3 = live GPUI queue: worker threads + 4 Hz poll loop, progress bars,
+> start / pause (cooperative cancel) / resume / retry / remove, add-from-
+> clipboard probing, persisted queue shared with the CLI.
 > The full XDM feature set (HLS/DASH, browser integration, video converter,
 > scheduler, …) is a roadmap, ported module by module (see below).
 
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, segments, speed limit, HTTP
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP
 crates/ccdm-cli    headless manager: probe/download/add/list/start
-crates/ccdm-gpui   desktop GUI shell (GPUI 0.2.2)
+crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons
 .github/workflows  CI: fmt + clippy + test, then release builds per OS
 ```
 
@@ -35,8 +36,9 @@ port its *concepts* clean-room (no copied code):
 | `DataAccess`/`AppDB`, `QueueManager` | `store::Store` (versioned JSON queue; SQLite + named/scheduled queues later) |
 | File-name helpers | `model::{guess_file_name, sanitize_file_name}` |
 | Transient-vs-fatal failures | `CcdmError::is_transient` + 3-attempt backoff in CLI `start` |
+| Cooperative cancel / pause | `cancel::CancelFlag` (XDM `CancelFlag`), checked per chunk, never auto-retried |
 | Progressive/adaptive HTTP downloaders | `http::{probe, download_with_resume, download_segmented}` |
-| WPF/GTK UI | `ccdm-gpui` (GPUI shell; live wiring is next) |
+| WPF/GTK UI + queue window | `ccdm-gpui`: live rows, progress bars, start/pause/resume/retry/remove, clipboard add |
 
 Still to port: HLS/DASH parsers, `MediaParser`, FFmpeg wrapper, browser
 native-messaging host + extensions, clipboard monitor, scheduler
@@ -86,9 +88,17 @@ Config lives in `<config-dir>/ccdm/config.json`, the queue in
 
 ## Roadmap
 
-- [ ] Live engine ↔ GPUI wiring (progress bars, pause/resume buttons)
-- [ ] Add-URL dialog, categories folders, speed-limit control in GUI
+- [x] Live engine ↔ GPUI wiring (progress bars, pause/resume buttons)
+- [ ] In-GUI speed-limit control + per-download connection setting
+- [ ] Categories folders, finished-file actions (open folder, re-download)
 - [ ] HLS (m3u8) + DASH (mpd) downloaders
 - [ ] Browser integration (native-messaging host + extension)
 - [ ] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [ ] Video probe/convert via system ffmpeg, updater, translations
+
+## GUI usage (after downloading the artifact)
+
+Run `ccdm-gpui`. Copy a download link anywhere, hit **Add from clipboard**
+(probes the URL in the background), then **Start**. **Pause** cancels at the
+next chunk boundary; **Resume** continues from the `.part` files. The queue
+is the same file the CLI uses, so `ccdm-cli list` sees GUI downloads too.

@@ -25,6 +25,14 @@ pub struct Store {
 }
 
 impl Store {
+    /// Empty in-memory queue bound to `path` (no IO performed).
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            queue: DownloadQueue::new(),
+        }
+    }
+
     /// OS-specific queue file path, if a config dir is known.
     pub fn default_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("ccdm").join("queue.json"))
