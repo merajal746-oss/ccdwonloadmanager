@@ -310,7 +310,7 @@ async fn fetch_range(
     total: u64,
     limiter: Option<SharedLimiter>,
     cancel: Option<CancelFlag>,
-    progress: &dyn Fn(u64, Option<u64>) + Send + Sync,
+    progress: &(dyn Fn(u64, Option<u64>) + Send + Sync),
     downloaded: &AtomicU64,
 ) -> Result<()> {
     if start > end {
