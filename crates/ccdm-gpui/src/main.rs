@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use gpui::{
     div, prelude::*, px, rgb, size, App, Application, Bounds, Context, CursorStyle, Div,
-    FocusHandle, KeyDownEvent, MouseButton, SharedString, Window, WindowBounds, WindowOptions,
+    FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, SharedString, Window, WindowBounds,
+    WindowOptions,
 };
 
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
@@ -205,10 +206,6 @@ fn shutdown_label(lang: &str, config: &AppConfig) -> String {
         "tb.shutdown",
         &[("v", &on_off(lang, config.shutdown_after_queue))],
     )
-}
-
-fn quality_label(lang: &str, config: &AppConfig) -> String {
-    i18n::format(lang, "tb.quality", &[("v", &config.video_quality)])
 }
 
 fn quality_label(lang: &str, config: &AppConfig) -> String {
@@ -985,37 +982,6 @@ impl DownloadManager {
         cx.notify();
     }
 
-    /// Locate the yt-dlp binary with a native file dialog.
-    fn browse_ytdlp(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = rfd::FileDialog::new().pick_file() {
-            self.config.ytdlp_path = Some(path.display().to_string());
-            self.save_config();
-        }
-        cx.notify();
-    }
-
-    /// Forget the yt-dlp path (auto-detect / setup takes over).
-    fn clear_ytdlp(&mut self, cx: &mut Context<Self>) {
-        self.config.ytdlp_path = None;
-        self.save_config();
-        cx.notify();
-    }
-
-    /// Open the translations folder (created on demand).
-    fn open_lang_dir(&mut self, cx: &mut Context<Self>) {
-        let lang = self.config.language.clone();
-        match ccdm_core::i18n::lang_dir() {
-            Some(dir) => {
-                let _ = std::fs::create_dir_all(&dir);
-                if let Err(e) = open::that(&dir) {
-                    self.notice = i18n::format(&lang, "n.reveal", &[("e", &e.to_string())]);
-                }
-            }
-            None => self.notice = i18n::t(&lang, "n.no_cfgdir"),
-        }
-        cx.notify();
-    }
-
     /// Download yt-dlp (+ffmpeg on Windows) in a worker thread.
     fn setup_video_tools(&mut self, cx: &mut Context<Self>) {
         let tx = self.tx.clone();
@@ -1204,23 +1170,23 @@ impl DownloadManager {
             return;
         }
         let update_tx = self.tx.clone();
+        let thread_lang = lang.clone();
+        let input_display = input.display().to_string();
         std::thread::spawn(move || {
             let result =
                 ccdm_core::convert::convert(&input, ccdm_core::convert::ConvertTarget::Mp3);
             let message = match result {
-                Ok(path) => i18n::format(
-                    &lang,
-                    "n.converted",
-                    &[("out", &path.display().to_string())],
-                ),
-                Err(e) => i18n::format(&lang, "n.convert_fail", &[("e", &e.to_string())]),
+                Ok(path) => {
+                    i18n::format(&thread_lang, "n.converted", &[("out", &path.display().to_string())])
+                }
+                Err(e) => i18n::format(&thread_lang, "n.convert_fail", &[("e", &e.to_string())]),
             };
             let _ = update_tx.send(UiEvent::Notice(message));
         });
         self.notice = i18n::format(
             &lang,
             "n.converting",
-            &[("file", &input.display().to_string())],
+            &[("file", &input_display)],
         );
         cx.notify();
     }
@@ -1287,6 +1253,7 @@ impl DownloadManager {
         let client = self.client.clone();
         let count = self.workers.len();
         let lang = self.config.language.clone();
+        let url_display = url.clone();
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1321,7 +1288,7 @@ impl DownloadManager {
                 },
             }
         });
-        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url)]);
+        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url_display)]);
         cx.notify();
     }
 
@@ -1333,6 +1300,7 @@ impl DownloadManager {
         let count = self.workers.len();
         let ytdlp_path = self.config.ytdlp_path.clone();
         let quality = self.config.video_quality.clone();
+        let url_display = url.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(Worker, bool), ccdm_core::CcdmError> {
                 let binary =
@@ -1383,7 +1351,7 @@ impl DownloadManager {
                 }
             }
         });
-        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url)]);
+        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url_display)]);
         cx.notify();
     }
 
@@ -2078,19 +2046,17 @@ impl DownloadManager {
                 String::new(),
                 {
                     let days = self.config.schedule.map(|s| s.days).unwrap_or(0);
-                    let mut actions = vec![settings_button(
-                        cx,
+                    let mut actions = vec![button(
                         theme,
                         sched_label(&lang, &self.config),
                         theme.muted,
-                        Self::toggle_sched,
+                        cx.listener(|this, _event, _window, cx| this.toggle_sched(cx)),
                     )];
                     for (day, letter) in ["M", "T", "W", "T", "F", "S", "S"].into_iter().enumerate()
                     {
                         let day = day as u8;
                         let on = (days & (1 << day)) != 0;
-                        actions.push(settings_button(
-                            cx,
+                        actions.push(button(
                             theme,
                             letter.to_string(),
                             if on { theme.primary } else { theme.muted },
