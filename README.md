@@ -5,15 +5,16 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.1 = engine foundation + headless CLI + minimal GPUI shell.
+> v0.2 = persisted queue + `add`/`list`/`start` CLI, global speed cap wired
+> into downloads, transient-error retries, filename sanitizing, proxy support.
 > The full XDM feature set (HLS/DASH, browser integration, video converter,
 > scheduler, …) is a roadmap, ported module by module (see below).
 
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, segments, speed limit, HTTP
-crates/ccdm-cli    headless downloader (proves the engine, no GUI needed)
+crates/ccdm-core   engine: model, config, queue, store, segments, speed limit, HTTP
+crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   desktop GUI shell (GPUI 0.2.2)
 .github/workflows  CI: fmt + clippy + test, then release builds per OS
 ```
@@ -28,15 +29,18 @@ port its *concepts* clean-room (no copied code):
 |---|---|
 | `Downloader/Chunk`, `ChunkState` | `ccdm-core::model::{Chunk, ChunkState}` |
 | `Downloader/Progressive/SegmentState`, `Piece` | `model::SegmentState`, `segmented::plan_segments` |
-| `Downloader/SpeedLimiter` | `speed_limiter::SpeedLimiter` (same sleep-the-difference idea) |
+| `Downloader/SpeedLimiter` | `speed_limiter::{SpeedLimiter, SharedLimiter}` — global cap enforced across all segments |
 | `DownloadEntries`, `DownloadQueue`, `Category` | `model::{DownloadEntry, Category}`, `queue::DownloadQueue` |
-| `Config` | `config::AppConfig` (JSON instead of registry/settings) |
+| `Config`, `ProxyInfo` | `config::AppConfig` (JSON; incl. `proxy_url`) |
+| `DataAccess`/`AppDB`, `QueueManager` | `store::Store` (versioned JSON queue; SQLite + named/scheduled queues later) |
+| File-name helpers | `model::{guess_file_name, sanitize_file_name}` |
+| Transient-vs-fatal failures | `CcdmError::is_transient` + 3-attempt backoff in CLI `start` |
 | Progressive/adaptive HTTP downloaders | `http::{probe, download_with_resume, download_segmented}` |
 | WPF/GTK UI | `ccdm-gpui` (GPUI shell; live wiring is next) |
 
 Still to port: HLS/DASH parsers, `MediaParser`, FFmpeg wrapper, browser
-native-messaging host + extensions, clipboard monitor, scheduler, updater,
-translations, themes.
+native-messaging host + extensions, clipboard monitor, scheduler
+(`DownloadSchedule`), updater, translations, themes.
 
 License: **GPL-2.0-only** (compatible with XDM's GPL-2.0). See `LICENSE`.
 
@@ -72,7 +76,13 @@ Then open the repo → **Actions** tab → latest run → download
 ```sh
 ccdm-cli probe <URL>
 ccdm-cli download <URL> [--output out.bin] [--connections 8]
+ccdm-cli add <URL> [--name file.zip]
+ccdm-cli list
+ccdm-cli start [--id ID] [--connections 8]
 ```
+
+Config lives in `<config-dir>/ccdm/config.json`, the queue in
+`<config-dir>/ccdm/queue.json` (Windows: `%APPDATA%\ccdm\...`).
 
 ## Roadmap
 

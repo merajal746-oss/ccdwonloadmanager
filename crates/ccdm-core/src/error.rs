@@ -25,6 +25,18 @@ pub enum CcdmError {
 /// Convenience alias.
 pub type Result<T> = std::result::Result<T, CcdmError>;
 
+impl CcdmError {
+    /// Whether retrying later might succeed (network hiccups, 5xx, ...),
+    /// as opposed to permanent problems (bad URL, no range support).
+    /// Mirrors XDM's transient-vs-fatal failure split.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Http(_) | Self::Io(_) | Self::Other(_) => true,
+            Self::InvalidUrl(_) | Self::RangeNotSupported => false,
+        }
+    }
+}
+
 impl From<reqwest::Error> for CcdmError {
     fn from(err: reqwest::Error) -> Self {
         Self::Http(err.to_string())

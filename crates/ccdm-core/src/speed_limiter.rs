@@ -25,6 +25,10 @@ pub struct SpeedLimiter {
     initialized: bool,
 }
 
+/// Handle shared by all connections of all downloads so the global cap
+/// holds no matter how many segments run at once (cf. XDM's global limit).
+pub type SharedLimiter = std::sync::Arc<tokio::sync::Mutex<SpeedLimiter>>;
+
 impl SpeedLimiter {
     /// Create a limiter; `limit_kbps == 0` disables throttling.
     pub fn new(limit_kbps: u32, enabled: bool) -> Self {
@@ -41,6 +45,16 @@ impl SpeedLimiter {
     pub fn set_limit(&mut self, limit_kbps: u32, enabled: bool) {
         self.limit_kbps = limit_kbps;
         self.enabled = enabled;
+    }
+
+    /// Build a shared limiter, or `None` when throttling is disabled.
+    pub fn shared(limit_kbps: u32, enabled: bool) -> Option<SharedLimiter> {
+        if enabled && limit_kbps > 0 {
+            let limiter = Self::new(limit_kbps, enabled);
+            Some(std::sync::Arc::new(tokio::sync::Mutex::new(limiter)))
+        } else {
+            None
+        }
     }
 
     /// Is throttling currently active?

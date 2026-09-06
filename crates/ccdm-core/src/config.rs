@@ -21,6 +21,9 @@ pub struct AppConfig {
     pub speed_limit_kbps: u32,
     /// Whether the speed cap applies.
     pub enable_speed_limit: bool,
+    /// HTTP(S) proxy URL, e.g. `http://127.0.0.1:8080` (cf. XDM ProxyInfo).
+    /// `None` (default) means direct connection.
+    pub proxy_url: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -34,15 +37,20 @@ impl Default for AppConfig {
             max_concurrent_downloads: 3,
             speed_limit_kbps: 0,
             enable_speed_limit: false,
+            proxy_url: None,
         }
     }
 }
 
 impl AppConfig {
-    /// Clamp to sane bounds (at least 1 connection, ...).
+    /// Clamp to sane bounds (at least 1 connection, ...) and drop an
+    /// empty proxy string back to `None`.
     pub fn normalized(mut self) -> Self {
         self.max_connections = self.max_connections.clamp(1, 32);
         self.max_concurrent_downloads = self.max_concurrent_downloads.clamp(1, 10);
+        if self.proxy_url.as_deref().map(str::trim) == Some("") {
+            self.proxy_url = None;
+        }
         self
     }
 

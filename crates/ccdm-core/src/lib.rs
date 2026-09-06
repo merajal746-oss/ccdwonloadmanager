@@ -12,10 +12,12 @@ pub mod model;
 pub mod queue;
 pub mod segmented;
 pub mod speed_limiter;
+pub mod store;
 
 pub use config::AppConfig;
 pub use error::{CcdmError, Result};
 pub use model::{Category, Chunk, ChunkState, DownloadEntry, DownloadStatus, SegmentState};
 pub use queue::DownloadQueue;
 pub use segmented::plan_segments;
-pub use speed_limiter::SpeedLimiter;
+pub use speed_limiter::{SharedLimiter, SpeedLimiter};
+pub use store::Store;

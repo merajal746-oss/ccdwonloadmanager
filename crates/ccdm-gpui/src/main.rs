@@ -10,13 +10,14 @@ use gpui::{
     prelude::*, px, rgb, size,
 };
 
-use ccdm_core::{Category, DownloadEntry, DownloadStatus};
+use ccdm_core::{AppConfig, Category, DownloadEntry, DownloadStatus};
 
 /// Root view: title + engine snapshot + roadmap.
 struct DownloadManager {
     title: SharedString,
     entries: Vec<DownloadEntry>,
     categories: Vec<Category>,
+    config_summary: String,
 }
 
 impl Render for DownloadManager {
@@ -63,6 +64,7 @@ impl Render for DownloadManager {
                             .child(label)
                     })),
             )
+            .child(div().text_sm().child(self.config_summary.clone()))
             .child(
                 div()
                     .text_sm()
@@ -97,10 +99,23 @@ fn main() {
                 ..Default::default()
             },
             |_, cx| {
-                cx.new(|_| DownloadManager {
-                    title: "ccdwonloadmanager".into(),
-                    entries: sample_entries(),
-                    categories: Category::default_categories(),
+                cx.new(|_| {
+                    let config = AppConfig::default().normalized();
+                    let cap = if config.enable_speed_limit && config.speed_limit_kbps > 0 {
+                        format!("cap {} KiB/s", config.speed_limit_kbps)
+                    } else {
+                        "no speed cap".to_string()
+                    };
+                    DownloadManager {
+                        title: "ccdwonloadmanager".into(),
+                        entries: sample_entries(),
+                        categories: Category::default_categories(),
+                        config_summary: format!(
+                            "dir: {} | {} conn | {cap}",
+                            config.download_dir.display(),
+                            config.max_connections,
+                        ),
+                    }
                 })
             },
         )

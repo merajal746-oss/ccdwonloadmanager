@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::segmented::plan_segments;
+
 /// Lifecycle of one download (like XDM's download state machine).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DownloadStatus {
@@ -121,6 +123,33 @@ impl DownloadEntry {
         }
     }
 
+    /// Create a queued entry with `segments` planned chunks for a known
+    /// size (the Rust equivalent of XDM's piece planning).
+    pub fn with_plan(
+        id: String,
+        url: String,
+        file_name: String,
+        total_bytes: Option<u64>,
+        segments: usize,
+    ) -> Self {
+        let mut entry = Self::new(id.clone(), url.clone(), file_name);
+        entry.total_bytes = total_bytes;
+        if let Some(total) = total_bytes {
+            if total > 0 {
+                let ranges = plan_segments(total, segments.max(1));
+                for (i, (start, end)) in ranges.iter().copied().enumerate() {
+                    entry.chunks.push(Chunk::new(
+                        format!("{id}#{i}"),
+                        url.clone(),
+                        start,
+                        Some(end - start + 1),
+                    ));
+                }
+            }
+        }
+        entry
+    }
+
     /// Overall progress in `0.0..=1.0`, if the total size is known.
     pub fn progress(&self) -> Option<f64> {
         match self.total_bytes {
@@ -153,6 +182,33 @@ pub fn guess_file_name(url: &str) -> String {
         "download.bin".to_string()
     } else {
         name.to_string()
+    }
+}
+
+/// Make a server-provided file name safe to use on Windows and Unix
+/// (cf. XDM's file-name helpers): `< > : " / \ | ? *` and control
+/// characters become `_`, trailing dots/spaces (illegal on Windows) are
+/// stripped, and an empty result falls back to `"download.bin"`.
+pub fn sanitize_file_name(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    while out.ends_with('.') || out.ends_with(' ') {
+        out.pop();
+    }
+    let trimmed = out.trim().to_string();
+    if trimmed.is_empty() {
+        "download.bin".to_string()
+    } else {
+        trimmed
     }
 }
 
@@ -239,5 +295,28 @@ mod tests {
             "Video"
         );
         assert!(Category::for_file_name(&cats, "noext").is_none());
+    }
+
+    #[test]
+    fn sanitize_replaces_illegal_chars() {
+        assert_eq!(sanitize_file_name("a<b>:c\"d/e\\f|g?h*i"), "a_b__c_d_e_f_g_h_i");
+        assert_eq!(sanitize_file_name("trailing...   "), "trailing");
+        assert_eq!(sanitize_file_name("..."), "download.bin");
+        assert_eq!(sanitize_file_name("  ok-name.zip  "), "ok-name.zip");
+    }
+
+    #[test]
+    fn with_plan_covers_total() {
+        let e = DownloadEntry::with_plan(
+            "x".into(),
+            "https://h/f".into(),
+            "f".into(),
+            Some(10),
+            3,
+        );
+        assert_eq!(e.chunks.len(), 3);
+        let covered: u64 = e.chunks.iter().map(|c| c.size.unwrap()).sum();
+        assert_eq!(covered, 10);
+        assert_eq!(e.chunks[0].id, "x#0");
     }
 }

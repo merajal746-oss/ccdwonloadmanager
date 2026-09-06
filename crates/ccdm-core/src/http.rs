@@ -20,16 +20,31 @@ use tokio::io::AsyncWriteExt;
 
 use crate::model::guess_file_name;
 use crate::segmented::plan_segments;
+use crate::speed_limiter::SharedLimiter;
 use crate::{CcdmError, Result};
 
-/// Build the shared HTTP client (tuned timeouts + identifiable UA).
+/// Build the shared HTTP client with default settings.
 pub fn build_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent("ccdm/0.1.0 (+https://github.com/ cc dwonloadmanager)")
+    build_client_with(&crate::AppConfig::default())
+}
+
+/// Build the HTTP client honoring `AppConfig` (proxy, ...).
+pub fn build_client_with(config: &crate::AppConfig) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .user_agent("ccdm/0.1.0")
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(3600))
-        .build()
-        .map_err(CcdmError::from)
+        .timeout(Duration::from_secs(3600));
+    if let Some(proxy) = config
+        .proxy_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        builder = builder.proxy(
+            reqwest::Proxy::all(proxy).map_err(|e| CcdmError::Other(e.to_string()))?,
+        );
+    }
+    builder.build().map_err(CcdmError::from)
 }
 
 /// What `probe` learned about a URL.
@@ -117,11 +132,13 @@ pub async fn probe(client: &reqwest::Client, url: &str) -> Result<ProbeResult> {
 /// If `dest` already exists, its length is used as the resume offset
 /// (via `Range`). When the server answers `200` instead of `206` the
 /// partial file is discarded and the download restarts from zero.
-/// `progress(downloaded, total)` is called after every chunk.
+/// `progress(downloaded, total)` is called after every chunk; `limiter`,
+/// when present, enforces the global speed cap (cf. XDM SpeedLimiter).
 pub async fn download_with_resume<F>(
     client: &reqwest::Client,
     url: &str,
     dest: &Path,
+    limiter: Option<SharedLimiter>,
     progress: F,
 ) -> Result<()>
 where
@@ -172,6 +189,9 @@ where
         file.write_all(&bytes).await.map_err(CcdmError::from)?;
         downloaded += bytes.len() as u64;
         progress(downloaded, total);
+        if let Some(lim) = &limiter {
+            lim.lock().await.throttle(downloaded);
+        }
     }
     file.flush().await.map_err(CcdmError::from)?;
     Ok(())
@@ -189,6 +209,7 @@ pub async fn download_segmented<F>(
     url: &str,
     dest: &Path,
     segments: usize,
+    limiter: Option<SharedLimiter>,
     progress: F,
 ) -> Result<()>
 where
@@ -198,7 +219,7 @@ where
     let total = match info.total_bytes {
         Some(t) if t > 0 && info.supports_ranges && segments > 1 => t,
         _ => {
-            return download_with_resume(client, &info.final_url, dest, progress).await;
+            return download_with_resume(client, &info.final_url, dest, limiter, progress).await;
         }
     };
 
@@ -212,7 +233,12 @@ where
         let part = part_path(dest, i);
         let have = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
         let want = end - start + 1;
-        if have >= want {
+        if have > want {
+            // Stale part (e.g. the file on the server shrank): restart it,
+            // otherwise assembling would silently corrupt the download.
+            let _ = tokio::fs::remove_file(&part).await;
+            pending.push((i, start, end));
+        } else if have == want {
             downloaded.fetch_add(want, Ordering::Relaxed);
         } else {
             downloaded.fetch_add(have, Ordering::Relaxed);
@@ -228,8 +254,20 @@ where
         let part = part_path(dest, i);
         let progress = Arc::clone(&progress);
         let downloaded = Arc::clone(&downloaded);
+        let limiter = limiter.clone();
         handles.push(tokio::spawn(async move {
-            fetch_range(&client, &url, &part, start, end, total, &progress, &downloaded).await
+            fetch_range(
+                &client,
+                &url,
+                &part,
+                start,
+                end,
+                total,
+                limiter,
+                &progress,
+                &downloaded,
+            )
+            .await
         }));
     }
     for h in handles {
@@ -251,6 +289,7 @@ async fn fetch_range(
     start: u64,
     end: u64,
     total: u64,
+    limiter: Option<SharedLimiter>,
     progress: &dyn Fn(u64, Option<u64>) + Send + Sync,
     downloaded: &AtomicU64,
 ) -> Result<()> {
@@ -287,9 +326,12 @@ async fn fetch_range(
     while let Some(item) = stream.next().await {
         let bytes = item.map_err(CcdmError::from)?;
         file.write_all(&bytes).await.map_err(CcdmError::from)?;
-        let now = downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed)
-            + bytes.len() as u64;
+        let now =
+            downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;
         progress(now, Some(total));
+        if let Some(lim) = &limiter {
+            lim.lock().await.throttle(now);
+        }
     }
     file.flush().await.map_err(CcdmError::from)?;
     Ok(())
