@@ -287,7 +287,7 @@ fn button(
     label: String,
     bg: u32,
     on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+) -> Div {
     div()
         .px_3()
         .py_1()
@@ -306,7 +306,7 @@ fn settings_button(
     label: String,
     bg: u32,
     action: fn(&mut DownloadManager, &mut Context<DownloadManager>),
-) -> impl IntoElement {
+) -> impl IntoElement + use<'_> {
     button(
         theme,
         label,
@@ -1742,9 +1742,14 @@ impl DownloadManager {
                                     theme,
                                     i18n::t(&lang, "row.folder"),
                                     theme.primary,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        this.reveal_row(folder_id.clone(), cx);
-                                    }),
+                                    cx.listener(
+                                        move |this: &mut DownloadManager,
+                                              _event,
+                                              _window,
+                                              cx| {
+                                            this.reveal_row(folder_id.clone(), cx);
+                                        },
+                                    ),
                                 ));
                                 let again_id = row.id.clone();
                                 actions.push(button(
@@ -2058,9 +2063,11 @@ impl DownloadManager {
                             theme,
                             letter.to_string(),
                             if on { theme.primary } else { theme.muted },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.toggle_sched_day(day, cx);
-                            }),
+                            cx.listener(
+                                move |this: &mut DownloadManager, _event, _window, cx| {
+                                    this.toggle_sched_day(day, cx);
+                                },
+                            ),
                         ));
                     }
                     actions
