@@ -1550,7 +1550,7 @@ impl DownloadManager {
                     .child(div().text_xl().child(i18n::format(
                         &lang,
                         "app.live",
-                        &[("t", &self.title.to_string())],
+                                &[("t", self.title.as_ref())],
                     )))
                     .child(
                         div()
@@ -2141,32 +2141,6 @@ impl DownloadManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn byte_units() {
-        assert_eq!(fmt_bytes(0), "0 B");
-        assert_eq!(fmt_bytes(512), "512 B");
-        assert_eq!(fmt_bytes(1536), "1.5 KiB");
-        assert_eq!(fmt_bytes(5 * 1024 * 1024), "5.0 MiB");
-    }
-
-    #[test]
-    fn eta_shapes() {
-        assert_eq!(fmt_eta(5), "00:05");
-        assert_eq!(fmt_eta(65), "01:05");
-        assert_eq!(fmt_eta(3665), "1:01:05");
-    }
-
-    #[test]
-    fn minutes_roundtrip() {
-        assert_eq!(minutes_to_hhmm(60), "01:00");
-        assert_eq!(minutes_to_hhmm(1439), "23:59");
-    }
-}
-
 fn main() {
     // Same source as the CLI so both tools share settings.
     let config = match AppConfig::config_path() {
@@ -2202,4 +2176,30 @@ fn main() {
         )
         .unwrap();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_units() {
+        assert_eq!(fmt_bytes(0), "0 B");
+        assert_eq!(fmt_bytes(512), "512 B");
+        assert_eq!(fmt_bytes(1536), "1.5 KiB");
+        assert_eq!(fmt_bytes(5 * 1024 * 1024), "5.0 MiB");
+    }
+
+    #[test]
+    fn eta_shapes() {
+        assert_eq!(fmt_eta(5), "00:05");
+        assert_eq!(fmt_eta(65), "01:05");
+        assert_eq!(fmt_eta(3665), "1:01:05");
+    }
+
+    #[test]
+    fn minutes_roundtrip() {
+        assert_eq!(minutes_to_hhmm(60), "01:00");
+        assert_eq!(minutes_to_hhmm(1439), "23:59");
+    }
 }
