@@ -24,7 +24,7 @@ pub mod store;
 pub mod update;
 pub mod video;
 
-pub use browser::{HOST_NAME, HostRequest, HostResponse};
+pub use browser::{HostRequest, HostResponse, HOST_NAME};
 pub use cancel::CancelFlag;
 pub use config::AppConfig;
 pub use error::{CcdmError, Result};

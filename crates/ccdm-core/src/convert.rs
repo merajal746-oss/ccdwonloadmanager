@@ -49,7 +49,11 @@ fn probe_binary(binary: &str) -> bool {
 /// ffmpeg binary: tools dir first (auto-setup), then PATH.
 pub fn ffmpeg_binary() -> Option<String> {
     if let Some(dir) = tools_dir() {
-        let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        let name = if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate.display().to_string());
@@ -78,8 +82,23 @@ pub fn convertible_to_mp3(file_name: &str) -> bool {
     let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
     matches!(
         ext.as_str(),
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "ts" | "mp3"
-            | "wav" | "flac" | "ogg" | "m4a" | "opus" | "wma" | "aac"
+        "mp4"
+            | "mkv"
+            | "avi"
+            | "mov"
+            | "wmv"
+            | "flv"
+            | "webm"
+            | "m4v"
+            | "ts"
+            | "mp3"
+            | "wav"
+            | "flac"
+            | "ogg"
+            | "m4a"
+            | "opus"
+            | "wma"
+            | "aac"
     )
 }
 

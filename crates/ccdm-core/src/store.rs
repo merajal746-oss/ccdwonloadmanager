@@ -58,8 +58,7 @@ impl Store {
             });
         }
         let text = std::fs::read_to_string(path).map_err(CcdmError::from)?;
-        let persisted: PersistedQueue =
-            serde_json::from_str(&text).map_err(CcdmError::from)?;
+        let persisted: PersistedQueue = serde_json::from_str(&text).map_err(CcdmError::from)?;
         let mut queue = DownloadQueue::new();
         for entry in persisted.entries {
             queue.add(entry);
@@ -73,8 +72,11 @@ impl Store {
     /// Save the queue (insertion order preserved) to its file.
     pub fn save(&self) -> Result<()> {
         let entries: Vec<DownloadEntry> = self.queue.iter_ordered().cloned().collect();
-        let text = serde_json::to_string_pretty(&PersistedQueue { version: 1, entries })
-            .map_err(CcdmError::from)?;
+        let text = serde_json::to_string_pretty(&PersistedQueue {
+            version: 1,
+            entries,
+        })
+        .map_err(CcdmError::from)?;
         if let Some(parent) = self.path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(CcdmError::from)?;

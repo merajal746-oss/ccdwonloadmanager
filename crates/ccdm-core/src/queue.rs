@@ -77,9 +77,7 @@ impl DownloadQueue {
     /// Move a paused/failed download back to Queued.
     pub fn resume(&mut self, id: &str) -> bool {
         match self.entries.get_mut(id) {
-            Some(e)
-                if matches!(e.status, DownloadStatus::Paused | DownloadStatus::Failed) =>
-            {
+            Some(e) if matches!(e.status, DownloadStatus::Paused | DownloadStatus::Failed) => {
                 e.status = DownloadStatus::Queued;
                 true
             }

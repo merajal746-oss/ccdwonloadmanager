@@ -16,10 +16,7 @@ pub struct ReleaseInfo {
 }
 
 /// Fetch the newest release of `owner/name` from the GitHub API.
-pub async fn latest_release(
-    repo: &str,
-    client: &reqwest::Client,
-) -> Result<ReleaseInfo> {
+pub async fn latest_release(repo: &str, client: &reqwest::Client) -> Result<ReleaseInfo> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let resp = client
         .get(&url)
@@ -34,8 +31,7 @@ pub async fn latest_release(
         )));
     }
     let text = resp.text().await.map_err(CcdmError::from)?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(CcdmError::from)?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(CcdmError::from)?;
     let tag = value
         .get("tag_name")
         .and_then(|v| v.as_str())
@@ -72,10 +68,7 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     let (current, latest) = (parts(current), parts(latest));
     let width = current.len().max(latest.len()).max(1);
     for i in 0..width {
-        let (a, b) = (
-            *current.get(i).unwrap_or(&0),
-            *latest.get(i).unwrap_or(&0),
-        );
+        let (a, b) = (*current.get(i).unwrap_or(&0), *latest.get(i).unwrap_or(&0));
         if a != b {
             return b > a;
         }

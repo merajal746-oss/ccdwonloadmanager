@@ -93,13 +93,8 @@ pub fn handle_request(
                 None => sanitize_file_name(&guess_file_name(&url)),
             };
             let id = new_id("host");
-            let entry = DownloadEntry::with_plan(
-                id.clone(),
-                url,
-                name,
-                None,
-                max_connections.max(1),
-            );
+            let entry =
+                DownloadEntry::with_plan(id.clone(), url, name, None, max_connections.max(1));
             store.queue_mut().add(entry);
             match store.save() {
                 Ok(()) => HostResponse::Accepted { id },

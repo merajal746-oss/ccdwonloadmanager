@@ -6,8 +6,8 @@
 //! resume just starts the missing ranges again.
 
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 /// Cheaply cloneable cancellation flag shared between the UI thread

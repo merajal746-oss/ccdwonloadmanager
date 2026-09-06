@@ -40,7 +40,10 @@ impl CcdmError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Http(_) | Self::Io(_) | Self::Other(_) => true,
-            Self::InvalidUrl(_) | Self::RangeNotSupported | Self::Cancelled | Self::Unsupported(_) => false,
+            Self::InvalidUrl(_)
+            | Self::RangeNotSupported
+            | Self::Cancelled
+            | Self::Unsupported(_) => false,
         }
     }
 }

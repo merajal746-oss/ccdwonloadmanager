@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
     atomic::{AtomicU64, Ordering},
+    Arc,
 };
 use std::time::Duration;
 
@@ -40,9 +40,8 @@ pub fn build_client_with(config: &crate::AppConfig) -> Result<reqwest::Client> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        builder = builder.proxy(
-            reqwest::Proxy::all(proxy).map_err(|e| CcdmError::Other(e.to_string()))?,
-        );
+        builder =
+            builder.proxy(reqwest::Proxy::all(proxy).map_err(|e| CcdmError::Other(e.to_string()))?);
     }
     builder.build().map_err(CcdmError::from)
 }
@@ -76,8 +75,8 @@ pub async fn probe(client: &reqwest::Client, url: &str) -> Result<ProbeResult> {
             let headers = resp.headers().clone();
             let total = content_length_of(&headers);
             let ranges = accepts_ranges(&headers);
-            let name = disposition_filename(&headers)
-                .unwrap_or_else(|| guess_file_name(&final_url));
+            let name =
+                disposition_filename(&headers).unwrap_or_else(|| guess_file_name(&final_url));
             let ctype = headers
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
@@ -112,8 +111,7 @@ pub async fn probe(client: &reqwest::Client, url: &str) -> Result<ProbeResult> {
     let headers = resp.headers().clone();
     let partial = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     let total = content_range_total(&headers).or_else(|| content_length_of(&headers));
-    let name =
-        disposition_filename(&headers).unwrap_or_else(|| guess_file_name(&final_url));
+    let name = disposition_filename(&headers).unwrap_or_else(|| guess_file_name(&final_url));
     let ctype = headers
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -146,7 +144,10 @@ pub async fn download_with_resume<F>(
 where
     F: Fn(u64, Option<u64>) + Send + Sync,
 {
-    let resume_from = tokio::fs::metadata(dest).await.map(|m| m.len()).unwrap_or(0);
+    let resume_from = tokio::fs::metadata(dest)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     let mut req = client.get(url);
     if resume_from > 0 {
@@ -162,7 +163,9 @@ where
     let partial = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     if resume_from > 0 && !partial {
         // Server ignored Range: restart from scratch.
-        tokio::fs::remove_file(dest).await.map_err(CcdmError::from)?;
+        tokio::fs::remove_file(dest)
+            .await
+            .map_err(CcdmError::from)?;
     }
     let base = if partial { resume_from } else { 0 };
     let total = resp.content_length().map(|r| base + r);
@@ -225,15 +228,8 @@ where
     let total = match info.total_bytes {
         Some(t) if t > 0 && info.supports_ranges && segments > 1 => t,
         _ => {
-            return download_with_resume(
-                client,
-                &info.final_url,
-                dest,
-                limiter,
-                cancel,
-                progress,
-            )
-            .await;
+            return download_with_resume(client, &info.final_url, dest, limiter, cancel, progress)
+                .await;
         }
     };
 
@@ -245,7 +241,10 @@ where
     let mut pending: Vec<(usize, u64, u64)> = Vec::new();
     for (i, (start, end)) in ranges.iter().copied().enumerate() {
         let part = part_path(dest, i);
-        let have = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
+        let have = tokio::fs::metadata(&part)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
         let want = end - start + 1;
         if have > want {
             // Stale part (e.g. the file on the server shrank): restart it,
@@ -332,7 +331,11 @@ async fn fetch_range(
     if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(CcdmError::RangeNotSupported);
     }
-    let append = tokio::fs::metadata(part).await.map(|m| m.len()).unwrap_or(0) > 0;
+    let append = tokio::fs::metadata(part)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0)
+        > 0;
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(!append)
@@ -349,8 +352,7 @@ async fn fetch_range(
             flag.check()?;
         }
         file.write_all(&bytes).await.map_err(CcdmError::from)?;
-        let now =
-            downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;
+        let now = downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;
         progress(now, Some(total));
         if let Some(lim) = &limiter {
             lim.lock().await.throttle(now);
@@ -389,7 +391,9 @@ async fn assemble_parts(dest: &Path, count: usize) -> Result<()> {
     drop(out);
     for i in 0..count {
         let part = part_path(dest, i);
-        tokio::fs::remove_file(&part).await.map_err(CcdmError::from)?;
+        tokio::fs::remove_file(&part)
+            .await
+            .map_err(CcdmError::from)?;
     }
     Ok(())
 }
@@ -476,11 +480,10 @@ mod tests {
         let mut h2 = reqwest::header::HeaderMap::new();
         h2.insert(
             CONTENT_DISPOSITION,
-            "attachment; filename*=UTF-8''v%C3%ADdeo.mp4".parse().unwrap(),
+            "attachment; filename*=UTF-8''v%C3%ADdeo.mp4"
+                .parse()
+                .unwrap(),
         );
-        assert_eq!(
-            disposition_filename(&h2).as_deref(),
-            Some("v%C3%ADdeo.mp4")
-        );
+        assert_eq!(disposition_filename(&h2).as_deref(), Some("v%C3%ADdeo.mp4"));
     }
 }

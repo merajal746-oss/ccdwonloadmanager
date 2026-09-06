@@ -23,12 +23,7 @@ fn overrides() -> &'static Mutex<HashMap<String, HashMap<String, String>>> {
 }
 
 fn override_get(lang: &str, key: &str) -> Option<String> {
-    overrides()
-        .lock()
-        .ok()?
-        .get(lang)?
-        .get(key)
-        .cloned()
+    overrides().lock().ok()?.get(lang)?.get(key).cloned()
 }
 
 /// Directory holding `<code>.json` language files, if known.
@@ -84,8 +79,7 @@ pub fn load_available() -> usize {
 /// Merge one language file over the embedded table.
 pub fn load_file(lang: &str, path: &Path) -> Result<()> {
     let text = std::fs::read_to_string(path).map_err(CcdmError::from)?;
-    let table: HashMap<String, String> =
-        serde_json::from_str(&text).map_err(CcdmError::from)?;
+    let table: HashMap<String, String> = serde_json::from_str(&text).map_err(CcdmError::from)?;
     if let Ok(mut all) = overrides().lock() {
         all.entry(lang.to_string()).or_default().extend(table);
         Ok(())

@@ -36,7 +36,10 @@ mod tests {
 
     #[test]
     fn even_split() {
-        assert_eq!(plan_segments(100, 4), vec![(0, 24), (25, 49), (50, 74), (75, 99)]);
+        assert_eq!(
+            plan_segments(100, 4),
+            vec![(0, 24), (25, 49), (50, 74), (75, 99)]
+        );
     }
 
     #[test]

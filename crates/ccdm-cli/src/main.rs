@@ -13,8 +13,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
     atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
 use anyhow::Context;
@@ -25,12 +25,16 @@ use ccdm_core::i18n;
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::update;
 use ccdm_core::{
-    AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter, Store, http,
-    media,
+    http, media, AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter,
+    Store,
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "ccdm-cli", version, about = "ccdwonloadmanager headless downloader")]
+#[command(
+    name = "ccdm-cli",
+    version,
+    about = "ccdwonloadmanager headless downloader"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -269,7 +273,11 @@ async fn main() -> anyhow::Result<()> {
             }
             println!(
                 "{}",
-                i18n::format(&lang, "c.probe_ranges", &[("v", &info.supports_ranges.to_string())])
+                i18n::format(
+                    &lang,
+                    "c.probe_ranges",
+                    &[("v", &info.supports_ranges.to_string())]
+                )
             );
             println!(
                 "{}",
@@ -381,30 +389,37 @@ async fn main() -> anyhow::Result<()> {
                     .progress()
                     .map(|p| format!("{:5.1}%", p * 100.0))
                     .unwrap_or_else(|| "   ---".to_string());
-                println!("{}  {:?}  {}  {}  {}", e.id, e.status, pct, e.file_name, e.url);
+                println!(
+                    "{}  {:?}  {}  {}  {}",
+                    e.id, e.status, pct, e.file_name, e.url
+                );
             }
             println!(
                 "{}",
-                i18n::format(&lang, "c.stored", &[("p", &store.path().display().to_string())])
+                i18n::format(
+                    &lang,
+                    "c.stored",
+                    &[("p", &store.path().display().to_string())]
+                )
             );
         }
-        Commands::Start { id, connections, force, wait, shutdown } => {
+        Commands::Start {
+            id,
+            connections,
+            force,
+            wait,
+            shutdown,
+        } => {
             if let Some(schedule) = &config.schedule {
                 if !force && !schedule.allows_now() {
                     let window = schedule.describe();
                     if wait {
-                        println!(
-                            "{}",
-                            i18n::format(&lang, "c.waiting", &[("w", &window)])
-                        );
+                        println!("{}", i18n::format(&lang, "c.waiting", &[("w", &window)]));
                         while !schedule.allows_now() {
                             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                         }
                     } else {
-                        println!(
-                            "{}",
-                            i18n::format(&lang, "c.outside", &[("w", &window)])
-                        );
+                        println!("{}", i18n::format(&lang, "c.outside", &[("w", &window)]));
                         return Ok(());
                     }
                 }
@@ -527,14 +542,21 @@ async fn main() -> anyhow::Result<()> {
                 i18n::format(
                     &lang,
                     "c.converting",
-                    &[("src", &file.display().to_string()), ("fmt", target.extension())]
+                    &[
+                        ("src", &file.display().to_string()),
+                        ("fmt", target.extension())
+                    ]
                 )
             );
             let output = ccdm_core::convert::convert(&file, target)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             println!(
                 "{}",
-                i18n::format(&lang, "c.converted", &[("out", &output.display().to_string())])
+                i18n::format(
+                    &lang,
+                    "c.converted",
+                    &[("out", &output.display().to_string())]
+                )
             );
         }
         Commands::UpdateCheck { repo } => {
@@ -555,10 +577,7 @@ async fn main() -> anyhow::Result<()> {
                     )
                 );
             } else {
-                println!(
-                    "{}",
-                    i18n::format(&lang, "c.upd_cur", &[("v", current)])
-                );
+                println!("{}", i18n::format(&lang, "c.upd_cur", &[("v", current)]));
             }
         }
         Commands::Lang { set } => {
@@ -569,10 +588,7 @@ async fn main() -> anyhow::Result<()> {
                         config
                             .save(&path)
                             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                        println!(
-                            "{}",
-                            i18n::format(&lang, "c.lang_set", &[("l", &code)])
-                        );
+                        println!("{}", i18n::format(&lang, "c.lang_set", &[("l", &code)]));
                     }
                     None => anyhow::bail!("no config dir on this platform"),
                 }
@@ -583,7 +599,11 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
         }
-        Commands::Video { url, output, quality } => {
+        Commands::Video {
+            url,
+            output,
+            quality,
+        } => {
             let ytdlp = ccdm_core::video::find_ytdlp(config.ytdlp_path.as_deref())
                 .ok_or_else(|| anyhow::anyhow!(i18n::t(&lang, "c.yt_noytdlp")))?;
             eprintln!(
@@ -625,7 +645,10 @@ async fn main() -> anyhow::Result<()> {
                     i18n::format(
                         &lang,
                         "c.done",
-                        &[("dest", &dest.display().to_string()), ("n", &got.to_string())]
+                        &[
+                            ("dest", &dest.display().to_string()),
+                            ("n", &got.to_string())
+                        ]
                     )
                 );
             } else if let (Some(video), Some(audio)) = (&media.video_url, &media.audio_url) {
@@ -644,11 +667,13 @@ async fn main() -> anyhow::Result<()> {
                 let _ = std::fs::remove_file(&atmp);
                 eprintln!(
                     "{}",
-                    i18n::format(&lang, "c.row_done", &[("dest", &dest.display().to_string())])
+                    i18n::format(
+                        &lang,
+                        "c.row_done",
+                        &[("dest", &dest.display().to_string())]
+                    )
                 );
-            } else if let Some(single) =
-                media.video_url.as_deref().or(media.audio_url.as_deref())
-            {
+            } else if let Some(single) = media.video_url.as_deref().or(media.audio_url.as_deref()) {
                 let (res, got, _) =
                     run_with_retry(&client, single, &dest, segments, limiter.clone(), &lang).await;
                 res?;
@@ -657,7 +682,10 @@ async fn main() -> anyhow::Result<()> {
                     i18n::format(
                         &lang,
                         "c.done",
-                        &[("dest", &dest.display().to_string()), ("n", &got.to_string())]
+                        &[
+                            ("dest", &dest.display().to_string()),
+                            ("n", &got.to_string())
+                        ]
                     )
                 );
             } else {

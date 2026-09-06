@@ -48,9 +48,8 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let download_dir = dirs::download_dir().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let download_dir = dirs::download_dir()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         Self {
             download_dir,
             max_connections: 8,

@@ -11,22 +11,22 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, Sender},
+    Arc, Mutex,
 };
 use std::time::Duration;
 
 use gpui::{
-    App, Application, Bounds, Context, CursorStyle, Div, FocusHandle, KeyDownEvent, MouseButton,
-    SharedString, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    div, prelude::*, px, rgb, size, App, Application, Bounds, Context, CursorStyle, Div,
+    FocusHandle, KeyDownEvent, MouseButton, SharedString, Window, WindowBounds, WindowOptions,
 };
 
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::speed_limiter::now_ms;
 use ccdm_core::{
-    AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, Schedule, SharedLimiter,
-    SpeedLimiter, Store, http, i18n, media,
+    http, i18n, media, AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, Schedule,
+    SharedLimiter, SpeedLimiter, Store,
 };
 
 /// Which page the window shows.
@@ -177,11 +177,19 @@ fn on_off(lang: &str, on: bool) -> String {
 }
 
 fn organize_label(lang: &str, config: &AppConfig) -> String {
-    i18n::format(lang, "tb.organize", &[("v", &on_off(lang, config.organize_by_category))])
+    i18n::format(
+        lang,
+        "tb.organize",
+        &[("v", &on_off(lang, config.organize_by_category))],
+    )
 }
 
 fn monitor_label(lang: &str, config: &AppConfig) -> String {
-    i18n::format(lang, "tb.monitor", &[("v", &on_off(lang, config.clipboard_monitor))])
+    i18n::format(
+        lang,
+        "tb.monitor",
+        &[("v", &on_off(lang, config.clipboard_monitor))],
+    )
 }
 
 fn sched_label(lang: &str, config: &AppConfig) -> String {
@@ -192,7 +200,11 @@ fn sched_label(lang: &str, config: &AppConfig) -> String {
 }
 
 fn shutdown_label(lang: &str, config: &AppConfig) -> String {
-    i18n::format(lang, "tb.shutdown", &[("v", &on_off(lang, config.shutdown_after_queue))])
+    i18n::format(
+        lang,
+        "tb.shutdown",
+        &[("v", &on_off(lang, config.shutdown_after_queue))],
+    )
 }
 
 fn quality_label(lang: &str, config: &AppConfig) -> String {
@@ -207,7 +219,17 @@ fn theme_label(lang: &str, config: &AppConfig) -> String {
     i18n::format(
         lang,
         "tb.theme",
-        &[("v", &i18n::t(lang, if config.dark_mode { "cm.dark" } else { "cm.light" }))],
+        &[(
+            "v",
+            &i18n::t(
+                lang,
+                if config.dark_mode {
+                    "cm.dark"
+                } else {
+                    "cm.light"
+                },
+            ),
+        )],
     )
 }
 
@@ -551,21 +573,21 @@ impl DownloadManager {
         rx: Receiver<UiEvent>,
     ) -> Self {
         // Refresh loop: pull worker state into the view ~4x/second.
-        cx.spawn(async move |view, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_millis(250)).await;
-                let alive = view.update(cx, |this, cx| {
-                    this.drain_events();
-                    this.sync_from_store();
-                    this.poll_clipboard(cx);
-                    this.refresh_rows();
-                    this.persist_if_changed();
-                    this.poll_shutdown();
-                    cx.notify();
-                });
-                if alive.is_err() {
-                    break;
-                }
+        cx.spawn(async move |view, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+            let alive = view.update(cx, |this, cx| {
+                this.drain_events();
+                this.sync_from_store();
+                this.poll_clipboard(cx);
+                this.refresh_rows();
+                this.persist_if_changed();
+                this.poll_shutdown();
+                cx.notify();
+            });
+            if alive.is_err() {
+                break;
             }
         })
         .detach();
@@ -574,18 +596,12 @@ impl DownloadManager {
             Ok(store) => store,
             Err(e) => {
                 eprintln!("queue load failed ({e}); starting fresh");
-                Store::new(
-                    Store::default_path().unwrap_or_else(|| PathBuf::from("queue.json")),
-                )
+                Store::new(Store::default_path().unwrap_or_else(|| PathBuf::from("queue.json")))
             }
         };
         let mut workers = Vec::new();
         for entry in store.queue().iter_ordered() {
-            let worker = Worker::new(
-                entry.id.clone(),
-                entry.url.clone(),
-                entry.file_name.clone(),
-            );
+            let worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
                 DownloadStatus::Paused => RowStatus::Paused,
@@ -609,7 +625,11 @@ impl DownloadManager {
         } else {
             "no speed cap".to_string()
         };
-        let theme = if config.dark_mode { THEME_DARK } else { THEME_LIGHT };
+        let theme = if config.dark_mode {
+            THEME_DARK
+        } else {
+            THEME_LIGHT
+        };
         let (sched_start_text, sched_end_text) = match &config.schedule {
             Some(schedule) => (
                 minutes_to_hhmm(schedule.start_minutes),
@@ -723,10 +743,8 @@ impl DownloadManager {
         let next = SPEED_STEPS[(pos + 1) % SPEED_STEPS.len()];
         self.config.speed_limit_kbps = next;
         self.config.enable_speed_limit = next > 0;
-        self.limiter = SpeedLimiter::shared(
-            self.config.speed_limit_kbps,
-            self.config.enable_speed_limit,
-        );
+        self.limiter =
+            SpeedLimiter::shared(self.config.speed_limit_kbps, self.config.enable_speed_limit);
         self.refresh_config_summary();
         self.save_config();
         cx.notify();
@@ -942,8 +960,7 @@ impl DownloadManager {
     /// Reveal the download folder in the file manager.
     fn open_download_dir(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = open::that(&self.config.download_dir) {
-            self.notice =
-                i18n::format(&self.config.language, "n.reveal", &[("e", &e.to_string())]);
+            self.notice = i18n::format(&self.config.language, "n.reveal", &[("e", &e.to_string())]);
         }
         cx.notify();
     }
@@ -1016,9 +1033,7 @@ impl DownloadManager {
                     let path = ccdm_core::video::setup_ytdlp(&client, |_, _| {})
                         .await
                         .map_err(|e| e.to_string())?;
-                    if let Err(e) =
-                        ccdm_core::video::setup_ffmpeg(&client, |_, _| {}).await
-                    {
+                    if let Err(e) = ccdm_core::video::setup_ffmpeg(&client, |_, _| {}).await {
                         eprintln!("ffmpeg setup skipped: {e}");
                     }
                     Ok::<_, String>(path.display().to_string())
@@ -1108,8 +1123,11 @@ impl DownloadManager {
             self.save_config();
             self.notice = i18n::t(&self.config.language, "n.shutting");
             if let Err(e) = ccdm_core::power::shutdown_host(60) {
-                self.notice =
-                    i18n::format(&self.config.language, "n.shut_fail", &[("e", &e.to_string())]);
+                self.notice = i18n::format(
+                    &self.config.language,
+                    "n.shut_fail",
+                    &[("e", &e.to_string())],
+                );
             }
         }
     }
@@ -1126,7 +1144,10 @@ impl DownloadManager {
         });
         match dest {
             Some(path) => {
-                let target = path.parent().map(|parent| parent.to_path_buf()).unwrap_or(path);
+                let target = path
+                    .parent()
+                    .map(|parent| parent.to_path_buf())
+                    .unwrap_or(path);
                 if let Err(e) = open::that(&target) {
                     self.notice =
                         i18n::format(&self.config.language, "n.reveal", &[("e", &e.to_string())]);
@@ -1187,9 +1208,11 @@ impl DownloadManager {
             let result =
                 ccdm_core::convert::convert(&input, ccdm_core::convert::ConvertTarget::Mp3);
             let message = match result {
-                Ok(path) => {
-                    i18n::format(&lang, "n.converted", &[("out", &path.display().to_string())])
-                }
+                Ok(path) => i18n::format(
+                    &lang,
+                    "n.converted",
+                    &[("out", &path.display().to_string())],
+                ),
                 Err(e) => i18n::format(&lang, "n.convert_fail", &[("e", &e.to_string())]),
             };
             let _ = update_tx.send(UiEvent::Notice(message));
@@ -1202,7 +1225,8 @@ impl DownloadManager {
         cx.notify();
     }
 
-    fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {        if let Some(name) = self.find(&id).map(|worker| {
+    fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(name) = self.find(&id).map(|worker| {
             worker.cancel.cancel();
             worker.file_name.clone()
         }) {
@@ -1311,12 +1335,13 @@ impl DownloadManager {
         let quality = self.config.video_quality.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<(Worker, bool), ccdm_core::CcdmError> {
-                let binary = ccdm_core::video::find_ytdlp(ytdlp_path.as_deref()).ok_or_else(|| {
-                    ccdm_core::CcdmError::Other(
-                        "yt-dlp not found — set ytdlp_path in config.json for video pages"
-                            .to_string(),
-                    )
-                })?;
+                let binary =
+                    ccdm_core::video::find_ytdlp(ytdlp_path.as_deref()).ok_or_else(|| {
+                        ccdm_core::CcdmError::Other(
+                            "yt-dlp not found — set ytdlp_path in config.json for video pages"
+                                .to_string(),
+                        )
+                    })?;
                 let media = ccdm_core::video::resolve(
                     &binary,
                     &url,
@@ -1380,11 +1405,7 @@ impl DownloadManager {
             if self.workers.iter().any(|w| w.id == entry.id) {
                 continue;
             }
-            let worker = Worker::new(
-                entry.id.clone(),
-                entry.url.clone(),
-                entry.file_name.clone(),
-            );
+            let worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
                 DownloadStatus::Paused => RowStatus::Paused,
@@ -1420,7 +1441,10 @@ impl DownloadManager {
                 UiEvent::Notice(message) => {
                     self.notice = message;
                 }
-                UiEvent::SetupDone { ytdlp_path, message } => {
+                UiEvent::SetupDone {
+                    ytdlp_path,
+                    message,
+                } => {
                     self.config.ytdlp_path = Some(ytdlp_path);
                     self.save_config();
                     self.notice = message;
@@ -1434,10 +1458,7 @@ impl DownloadManager {
         let now = std::time::Instant::now();
         let mut rows = Vec::with_capacity(snapshots.len());
         for mut row in snapshots {
-            let slot = self
-                .speed_prev
-                .entry(row.id.clone())
-                .or_insert((0, now, 0));
+            let slot = self.speed_prev.entry(row.id.clone()).or_insert((0, now, 0));
             let elapsed = now.duration_since(slot.1).as_secs_f32();
             let instant = if elapsed > 0.01 {
                 row.downloaded.saturating_sub(slot.0) as f32 / elapsed
@@ -1494,8 +1515,7 @@ impl DownloadManager {
             self.store.queue_mut().add(entry);
         }
         if let Err(e) = self.store.save() {
-            self.notice =
-                i18n::format(&self.config.language, "n.save_q", &[("e", &e.to_string())]);
+            self.notice = i18n::format(&self.config.language, "n.save_q", &[("e", &e.to_string())]);
         }
     }
 
@@ -1579,15 +1599,11 @@ impl DownloadManager {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(
-                        div()
-                            .text_xl()
-                            .child(i18n::format(
-                                &lang,
-                                "app.live",
-                                &[("t", &self.title.to_string())],
-                            )),
-                    )
+                    .child(div().text_xl().child(i18n::format(
+                        &lang,
+                        "app.live",
+                        &[("t", &self.title.to_string())],
+                    )))
                     .child(
                         div()
                             .text_sm()
@@ -1706,8 +1722,11 @@ impl DownloadManager {
                     .text_color(rgb(theme.faint))
                     .child(i18n::t(&lang, "app.empty"))
             } else {
-                div().flex().flex_col().gap_2().children(self.rows.iter().map(
-                    |row| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(self.rows.iter().map(|row| {
                         let frac = match row.total {
                             Some(t) if t > 0 => (row.downloaded.min(t) as f32) / (t as f32),
                             _ => 0.0,
@@ -1885,31 +1904,26 @@ impl DownloadManager {
                                     .child(row.url.clone()),
                             )
                             .child(div().flex().gap_2().children(actions))
-                    },
-                ))
+                    }))
             })
             .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .px_3()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .text_color(rgb(theme.faint))
-                            .child(i18n::format(
-                                &lang,
-                                "app.footer",
-                                &[
-                                    ("n", &total.to_string()),
-                                    ("a", &active.to_string()),
-                                    ("d", &fmt_bytes(total_down)),
-                                    ("t", &fmt_bytes(total_size)),
-                                    ("s", &format!("{}/s", fmt_bytes(total_speed))),
-                                ],
-                            )),
-                    ),
+                div().flex().gap_2().px_3().child(
+                    div()
+                        .flex_1()
+                        .text_xs()
+                        .text_color(rgb(theme.faint))
+                        .child(i18n::format(
+                            &lang,
+                            "app.footer",
+                            &[
+                                ("n", &total.to_string()),
+                                ("a", &active.to_string()),
+                                ("d", &fmt_bytes(total_down)),
+                                ("t", &fmt_bytes(total_size)),
+                                ("s", &format!("{}/s", fmt_bytes(total_speed))),
+                            ],
+                        )),
+                ),
             )
     }
 
@@ -2071,9 +2085,7 @@ impl DownloadManager {
                         theme.muted,
                         Self::toggle_sched,
                     )];
-                    for (day, letter) in ["M", "T", "W", "T", "F", "S", "S"]
-                        .into_iter()
-                        .enumerate()
+                    for (day, letter) in ["M", "T", "W", "T", "F", "S", "S"].into_iter().enumerate()
                     {
                         let day = day as u8;
                         let on = (days & (1 << day)) != 0;

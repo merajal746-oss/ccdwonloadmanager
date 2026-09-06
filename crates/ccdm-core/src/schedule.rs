@@ -147,7 +147,12 @@ mod tests {
     fn describe_shapes() {
         let nightly = Schedule::nightly().describe();
         assert!(nightly.starts_with("daily 01:00"), "got {nightly}");
-        let never = Schedule { days: 0, start_minutes: 0, end_minutes: 60 }.describe();
+        let never = Schedule {
+            days: 0,
+            start_minutes: 0,
+            end_minutes: 60,
+        }
+        .describe();
         assert!(never.starts_with("never 00:00"), "got {never}");
     }
 

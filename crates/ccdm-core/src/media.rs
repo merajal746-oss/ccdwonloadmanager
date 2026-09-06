@@ -155,11 +155,18 @@ pub fn parse_media(base: &str, text: &str) -> Result<HlsMedia> {
         } else if line.starts_with('#') {
             continue;
         } else if let Some(duration) = pending_duration.take() {
-            media.segments.push(HlsSegment { uri: resolve_url(base, line)?, duration });
+            media.segments.push(HlsSegment {
+                uri: resolve_url(base, line)?,
+                duration,
+            });
         } else {
             // Lenient: bare URI without EXTINF still downloads.
-            media.segments.push(HlsSegment { uri: resolve_url(base, line)?, duration: 0.0 });
-        }    }
+            media.segments.push(HlsSegment {
+                uri: resolve_url(base, line)?,
+                duration: 0.0,
+            });
+        }
+    }
     Ok(media)
 }
 
@@ -252,10 +259,7 @@ fn parse_attrs(s: &str) -> Vec<(String, String)> {
 }
 
 fn attr(attrs: &[(String, String)], key: &str) -> Option<String> {
-    attrs
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.clone())
+    attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
 }
 
 /// Read `<...>` at `start`; skips comments/prologs (returns `None` tag).
@@ -436,7 +440,9 @@ pub fn parse_mpd(mpd_url: &str, text: &str) -> Result<Vec<DashStream>> {
                 "BaseURL" => base_capture = false,
                 _ => {}
             }
-            if stack.last().map(String::as_str) == Some(tag.name.as_str()) { stack.pop(); }
+            if stack.last().map(String::as_str) == Some(tag.name.as_str()) {
+                stack.pop();
+            }
             continue;
         }
         match tag.name.as_str() {
@@ -446,8 +452,8 @@ pub fn parse_mpd(mpd_url: &str, text: &str) -> Result<Vec<DashStream>> {
                         "live/dynamic DASH (MPD@type=dynamic)".to_string(),
                     ));
                 }
-                if let Some(total) = attr(&tag.attrs, "mediaPresentationDuration")
-                    .and_then(|s| parse_iso8601(&s))
+                if let Some(total) =
+                    attr(&tag.attrs, "mediaPresentationDuration").and_then(|s| parse_iso8601(&s))
                 {
                     mpd_dur = Some(total);
                 }
@@ -613,7 +619,11 @@ fn finish_rep(
         base = resolve_url(&base, part)?;
     }
     let mime = rep.mime.or_else(|| as_mime.map(str::to_string));
-    let seg_urls = if rep.seg_urls.is_empty() { as_seg_urls } else { &rep.seg_urls };
+    let seg_urls = if rep.seg_urls.is_empty() {
+        as_seg_urls
+    } else {
+        &rep.seg_urls
+    };
     if !seg_urls.is_empty() {
         let segments = seg_urls
             .iter()
@@ -634,9 +644,10 @@ fn finish_rep(
         }));
     }
     if let Some(tpl) = rep.tpl.as_ref().or(as_tpl) {
-        let media = tpl.media.as_deref().ok_or_else(|| {
-            CcdmError::Unsupported("SegmentTemplate without @media".to_string())
-        })?;
+        let media = tpl
+            .media
+            .as_deref()
+            .ok_or_else(|| CcdmError::Unsupported("SegmentTemplate without @media".to_string()))?;
         let seg_dur = tpl
             .duration
             .filter(|d| *d > 0.0)
@@ -707,11 +718,7 @@ fn pick_dash(streams: &[DashStream]) -> Option<&DashStream> {
 }
 
 /// Fetch a (small) text playlist, refusing oversized bodies.
-async fn fetch_text(
-    client: &reqwest::Client,
-    url: &str,
-    max_bytes: u64,
-) -> Result<String> {
+async fn fetch_text(client: &reqwest::Client, url: &str, max_bytes: u64) -> Result<String> {
     let resp = client.get(url).send().await.map_err(CcdmError::from)?;
     if !resp.status().is_success() {
         return Err(CcdmError::Http(format!(
@@ -728,8 +735,7 @@ async fn fetch_text(
             return Err(CcdmError::Other("playlist too large".to_string()));
         }
     }
-    String::from_utf8(buf)
-        .map_err(|e| CcdmError::Other(format!("playlist is not UTF-8: {e}")))
+    String::from_utf8(buf).map_err(|e| CcdmError::Other(format!("playlist is not UTF-8: {e}")))
 }
 
 /// Append one media segment, honoring cancel/speed/progress.
@@ -784,8 +790,8 @@ where
 {
     use tokio::io::AsyncWriteExt;
     let text = fetch_text(client, url, 8 * 1024 * 1024).await?;
-    let kind = classify(&text)
-        .ok_or_else(|| CcdmError::Other(format!("not a media playlist: {url}")))?;
+    let kind =
+        classify(&text).ok_or_else(|| CcdmError::Other(format!("not a media playlist: {url}")))?;
     let mut dest = dest.to_path_buf();
     let ext = dest
         .extension()
@@ -835,8 +841,16 @@ where
                 return Err(CcdmError::Other("empty HLS playlist".to_string()));
             }
             if let Some(map) = &media.map_uri {
-                append_url(client, map, &mut file, &limiter, &cancel, &mut downloaded, &progress)
-                    .await?;
+                append_url(
+                    client,
+                    map,
+                    &mut file,
+                    &limiter,
+                    &cancel,
+                    &mut downloaded,
+                    &progress,
+                )
+                .await?;
             }
             for segment in &media.segments {
                 append_url(
@@ -859,8 +873,16 @@ where
                 return Err(CcdmError::Other("empty DASH stream".to_string()));
             }
             if let Some(init) = &best.init {
-                append_url(client, init, &mut file, &limiter, &cancel, &mut downloaded, &progress)
-                    .await?;
+                append_url(
+                    client,
+                    init,
+                    &mut file,
+                    &limiter,
+                    &cancel,
+                    &mut downloaded,
+                    &progress,
+                )
+                .await?;
             }
             for segment in &best.segments {
                 append_url(
@@ -968,7 +990,8 @@ mod tests {
 
     #[test]
     fn mpd_template_expands() {
-        let streams = parse_mpd("https://cdn.example.com/dash/manifest.mpd", MPD_TEMPLATE).unwrap();        assert_eq!(streams.len(), 1);
+        let streams = parse_mpd("https://cdn.example.com/dash/manifest.mpd", MPD_TEMPLATE).unwrap();
+        assert_eq!(streams.len(), 1);
         assert_eq!(
             streams[0].segments,
             vec![

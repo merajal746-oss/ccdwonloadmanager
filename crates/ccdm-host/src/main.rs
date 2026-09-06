@@ -13,11 +13,16 @@
 
 use std::path::PathBuf;
 
-use ccdm_core::{AppConfig, Store, browser};
+use ccdm_core::{browser, AppConfig, Store};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["manifest", "--firefox"] => {
             let exe = exe_string();
             let manifest = browser::firefox_manifest(&exe, "REPLACE-WITH-EXTENSION-ID");
@@ -80,10 +85,8 @@ fn install() {
     let exe = std::env::current_exe().expect("own exe path");
     let dir = exe.parent().expect("exe dir").to_path_buf();
     let manifest_path = dir.join(format!("{}.json", browser::HOST_NAME));
-    let manifest = browser::chrome_manifest(
-        &exe.display().to_string(),
-        "REPLACE-WITH-EXTENSION-ID",
-    );
+    let manifest =
+        browser::chrome_manifest(&exe.display().to_string(), "REPLACE-WITH-EXTENSION-ID");
     std::fs::write(
         &manifest_path,
         serde_json::to_string_pretty(&manifest).unwrap(),
@@ -93,23 +96,48 @@ fn install() {
     println!("edit allowed_origins to your extension id, then register:");
     if cfg!(windows) {
         for (root, key) in [
-            ("HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts", "Chrome"),
-            ("HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts", "Edge"),
+            (
+                "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
+                "Chrome",
+            ),
+            (
+                "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts",
+                "Edge",
+            ),
             ("HKCU\\Software\\Mozilla\\NativeMessagingHosts", "Firefox"),
         ] {
             let full = format!("{root}\\{}", browser::HOST_NAME);
             let status = std::process::Command::new("reg")
-                .args(["add", &full, "/ve", "/d", &manifest_path.display().to_string(), "/f"])
+                .args([
+                    "add",
+                    &full,
+                    "/ve",
+                    "/d",
+                    &manifest_path.display().to_string(),
+                    "/f",
+                ])
                 .status();
             println!("  [{key}] {full} -> {status:?}");
         }
         println!("note: Firefox uses the Chrome-shape manifest only if");
         println!("`allowed_extensions` is used instead — regenerate with:");
-        println!("  ccdm-host manifest --firefox > {}", manifest_path.display());
+        println!(
+            "  ccdm-host manifest --firefox > {}",
+            manifest_path.display()
+        );
     } else {
-        println!("  Linux:   ~/.config/google-chrome/NativeMessagingHosts/{}.json", browser::HOST_NAME);
-        println!("  macOS:   ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/{}.json", browser::HOST_NAME);
-        println!("  Firefox: ~/.mozilla/native-messaging-hosts/{}.json", browser::HOST_NAME);
+        println!(
+            "  Linux:   ~/.config/google-chrome/NativeMessagingHosts/{}.json",
+            browser::HOST_NAME
+        );
+        println!(
+            "  macOS:   ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/{}.json",
+            browser::HOST_NAME
+        );
+        println!(
+            "  Firefox: ~/.mozilla/native-messaging-hosts/{}.json",
+            browser::HOST_NAME
+        );
         println!("copy the manifest printed by `ccdm-host manifest [--firefox]` there.");
     }
 }

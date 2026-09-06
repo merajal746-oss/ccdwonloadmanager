@@ -202,8 +202,7 @@ pub fn sanitize_file_name(name: &str) -> String {
     let mut out: String = name
         .chars()
         .map(|c| {
-            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-            {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
                 '_'
             } else {
                 c
@@ -258,7 +257,9 @@ impl Category {
         vec![
             mk(
                 "Documents",
-                &["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt"],
+                &[
+                    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt",
+                ],
             ),
             mk(
                 "Video",
@@ -269,7 +270,10 @@ impl Category {
                 "Compressed",
                 &["zip", "rar", "7z", "tar", "gz", "bz2", "xz"],
             ),
-            mk("Programs", &["exe", "msi", "dmg", "pkg", "deb", "rpm", "apk"]),
+            mk(
+                "Programs",
+                &["exe", "msi", "dmg", "pkg", "deb", "rpm", "apk"],
+            ),
             mk(
                 "Images",
                 &["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp"],
@@ -306,10 +310,7 @@ mod tests {
 
     #[test]
     fn guess_name_from_url() {
-        assert_eq!(
-            guess_file_name("https://host/dir/file.zip?x=1"),
-            "file.zip"
-        );
+        assert_eq!(guess_file_name("https://host/dir/file.zip?x=1"), "file.zip");
         assert_eq!(guess_file_name("https://host/"), "download.bin");
         assert_eq!(guess_file_name("not a url"), "download.bin");
     }
@@ -326,20 +327,18 @@ mod tests {
 
     #[test]
     fn sanitize_replaces_illegal_chars() {
-        assert_eq!(sanitize_file_name("a<b>:c\"d/e\\f|g?h*i"), "a_b__c_d_e_f_g_h_i");
+        assert_eq!(
+            sanitize_file_name("a<b>:c\"d/e\\f|g?h*i"),
+            "a_b__c_d_e_f_g_h_i"
+        );
         assert_eq!(sanitize_file_name("trailing...   "), "trailing");
         assert_eq!(sanitize_file_name("..."), "download.bin");
         assert_eq!(sanitize_file_name("  ok-name.zip  "), "ok-name.zip");
     }
 
     #[test]
-    fn with_plan_covers_total() {        let e = DownloadEntry::with_plan(
-            "x".into(),
-            "https://h/f".into(),
-            "f".into(),
-            Some(10),
-            3,
-        );
+    fn with_plan_covers_total() {
+        let e = DownloadEntry::with_plan("x".into(), "https://h/f".into(), "f".into(), Some(10), 3);
         assert_eq!(e.chunks.len(), 3);
         let covered: u64 = e.chunks.iter().map(|c| c.size.unwrap()).sum();
         assert_eq!(covered, 10);

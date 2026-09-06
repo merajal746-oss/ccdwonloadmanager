@@ -30,7 +30,9 @@ pub fn is_video_page(url: &str) -> bool {
         .ok()
         .and_then(|u| u.host_str().map(str::to_lowercase))
         .unwrap_or_default();
-    VIDEO_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+    VIDEO_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
 }
 
 /// yt-dlp `-f` specs preferring a **single file** (GUI auto-resolve).
@@ -197,9 +199,7 @@ where
     let zip_path = dir.join("ffmpeg.zip");
     let _ = tokio::fs::remove_file(&zip_path).await;
     crate::http::download_with_resume(client, url, &zip_path, None, None, progress).await?;
-    let data = tokio::fs::read(&zip_path)
-        .await
-        .map_err(CcdmError::from)?;
+    let data = tokio::fs::read(&zip_path).await.map_err(CcdmError::from)?;
     let exe = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
         let cursor = std::io::Cursor::new(data);
         let mut archive = zip::ZipArchive::new(cursor)
@@ -210,8 +210,7 @@ where
                 .map_err(|e| CcdmError::Other(e.to_string()))?;
             if !file.is_dir() && file.name().ends_with("bin/ffmpeg.exe") {
                 let mut buf = Vec::new();
-                std::io::Read::read_to_end(&mut file, &mut buf)
-                    .map_err(CcdmError::from)?;
+                std::io::Read::read_to_end(&mut file, &mut buf).map_err(CcdmError::from)?;
                 return Ok(buf);
             }
         }
@@ -250,8 +249,14 @@ pub fn parse_resolved(value: &Value) -> ResolvedMedia {
     if let Some(formats) = value.get("requested_formats").and_then(|v| v.as_array()) {
         for format in formats {
             let url = format.get("url").and_then(|v| v.as_str());
-            let vcodec = format.get("vcodec").and_then(|v| v.as_str()).unwrap_or("none");
-            let acodec = format.get("acodec").and_then(|v| v.as_str()).unwrap_or("none");
+            let vcodec = format
+                .get("vcodec")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let acodec = format
+                .get("acodec")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
             if video_url.is_none() && vcodec != "none" {
                 video_url = url.map(str::to_string);
             }
@@ -292,13 +297,17 @@ pub fn resolve(ytdlp: &str, url: &str, format_spec: &str) -> Result<ResolvedMedi
             lines[start..].join(" | ")
         )));
     }
-    let value: Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| CcdmError::Other(format!("yt-dlp returned bad JSON: {e}")))?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| CcdmError::Other(format!("yt-dlp returned bad JSON: {e}")))?;
     Ok(parse_resolved(&value))
 }
 
 /// Mux separate video+audio files (stream copy, no re-encode).
-pub fn mux_av(video: &std::path::Path, audio: &std::path::Path, output: &std::path::Path) -> Result<()> {
+pub fn mux_av(
+    video: &std::path::Path,
+    audio: &std::path::Path,
+    output: &std::path::Path,
+) -> Result<()> {
     let ffmpeg = ffmpeg_binary().ok_or_else(|| {
         CcdmError::Other("ffmpeg not found — Setup video tools or install it".to_string())
     })?;
@@ -360,7 +369,10 @@ mod tests {
             "url": "https://r1---example.googlevideo.com/videoplayback?x=1",
         }));
         assert_eq!(media.title, "Some Video");
-        assert_eq!(media.direct_url.as_deref(), Some("https://r1---example.googlevideo.com/videoplayback?x=1"));
+        assert_eq!(
+            media.direct_url.as_deref(),
+            Some("https://r1---example.googlevideo.com/videoplayback?x=1")
+        );
         assert!(!media.needs_mux());
         assert_eq!(media.playback_url(), media.direct_url.as_deref());
     }
