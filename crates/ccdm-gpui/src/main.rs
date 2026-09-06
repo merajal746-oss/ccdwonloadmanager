@@ -586,7 +586,8 @@ impl DownloadManager {
         };
         let mut workers = Vec::new();
         for entry in store.queue().iter_ordered() {
-            let mut worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            let mut worker =
+                Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
             worker.segments = entry.segments;
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
@@ -725,15 +726,8 @@ impl DownloadManager {
 
     /// Cycle this row's connection override (None = follow default).
     fn cycle_row_conns(&mut self, id: String, cx: &mut Context<Self>) {
-        const STEPS: &[Option<usize>] = &[
-            None,
-            Some(1),
-            Some(2),
-            Some(4),
-            Some(8),
-            Some(16),
-            Some(32),
-        ];
+        const STEPS: &[Option<usize>] =
+            &[None, Some(1), Some(2), Some(4), Some(8), Some(16), Some(32)];
         if let Some(worker) = self.workers.iter().find(|w| w.id == id) {
             if worker.alive.load(Ordering::SeqCst) {
                 return;
@@ -1161,7 +1155,7 @@ impl DownloadManager {
                     dest.display()
                 )));
             }
-        if let Some(worker) = self.workers.iter_mut().find(|w| w.id == id) {
+            if let Some(worker) = self.workers.iter_mut().find(|w| w.id == id) {
                 worker.downloaded.store(0, Ordering::Relaxed);
             }
         }
@@ -1409,7 +1403,8 @@ impl DownloadManager {
             if self.workers.iter().any(|w| w.id == entry.id) {
                 continue;
             }
-            let mut worker = Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
+            let mut worker =
+                Worker::new(entry.id.clone(), entry.url.clone(), entry.file_name.clone());
             worker.segments = entry.segments;
             *worker.status.lock().unwrap() = match entry.status {
                 DownloadStatus::Finished => RowStatus::Finished,
@@ -1729,10 +1724,9 @@ impl DownloadManager {
                     ),
             )
             .child(if self.show_add_dialog {
-                let (text, empty) = self.add_field.display(
-                    self.add_field.focus.is_focused(window),
-                    "https://...",
-                );
+                let (text, empty) = self
+                    .add_field
+                    .display(self.add_field.focus.is_focused(window), "https://...");
                 let focused = self.add_field.focus.is_focused(window);
                 div()
                     .flex()

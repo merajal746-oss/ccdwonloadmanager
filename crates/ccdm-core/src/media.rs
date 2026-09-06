@@ -1091,10 +1091,7 @@ mod tests {
         assert_eq!(audio.id, "a");
         assert_eq!(
             audio.segments,
-            vec![
-                "https://h.com/m/a-1.m4s",
-                "https://h.com/m/a-2.m4s",
-            ]
+            vec!["https://h.com/m/a-1.m4s", "https://h.com/m/a-2.m4s",]
         );
     }
 

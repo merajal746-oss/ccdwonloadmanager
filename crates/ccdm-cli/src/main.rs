@@ -353,7 +353,11 @@ async fn main() -> anyhow::Result<()> {
                 )
             );
         }
-        Commands::Add { url, name, connections } => {
+        Commands::Add {
+            url,
+            name,
+            connections,
+        } => {
             let info = http::probe(&client, &url)
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
