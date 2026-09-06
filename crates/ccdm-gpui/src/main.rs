@@ -300,13 +300,13 @@ fn button(
 }
 
 /// Settings-screen button dispatching to a view method by fn pointer.
-fn settings_button(
-    cx: &mut Context<DownloadManager>,
+fn settings_button<'a>(
+    cx: &'a mut Context<'a, DownloadManager>,
     theme: Theme,
     label: String,
     bg: u32,
     action: fn(&mut DownloadManager, &mut Context<DownloadManager>),
-) -> impl IntoElement + use<'_> {
+) -> impl IntoElement + use<'a> {
     button(
         theme,
         label,
