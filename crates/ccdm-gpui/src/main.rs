@@ -299,24 +299,6 @@ fn button(
         .child(label)
 }
 
-/// Settings-screen button dispatching to a view method by fn pointer.
-fn settings_button<'a>(
-    cx: &'a mut Context<'a, DownloadManager>,
-    theme: Theme,
-    label: String,
-    bg: u32,
-    action: fn(&mut DownloadManager, &mut Context<DownloadManager>),
-) -> impl IntoElement + use<'a> {
-    button(
-        theme,
-        label,
-        bg,
-        cx.listener(move |this, _event, _window, cx| {
-            action(this, cx);
-        }),
-    )
-}
-
 /// Single-line text editor for settings fields (proxy URLs, repo names,
 /// HH:MM times). Char-boundary-safe cursor math throughout.
 struct TextField {
@@ -1919,12 +1901,11 @@ impl DownloadManager {
                 div()
                     .flex()
                     .gap_2()
-                    .child(settings_button(
-                        cx,
+                    .child(button(
                         theme,
                         i18n::t(&lang, "tb.back"),
                         theme.muted,
-                        Self::toggle_screen,
+                        cx.listener(|this, _event, _window, cx| this.toggle_screen(cx)),
                     ))
                     .child(div().flex_1().text_xl().child(i18n::t(&lang, "set.title"))),
             )
@@ -1933,19 +1914,17 @@ impl DownloadManager {
                 i18n::t(&lang, "set.folder"),
                 self.config.download_dir.display().to_string(),
                 vec![
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.browse"),
                         theme.primary,
-                        Self::browse_download_dir,
+                        cx.listener(|this, _event, _window, cx| this.browse_download_dir(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.open"),
                         theme.muted,
-                        Self::open_download_dir,
+                        cx.listener(|this, _event, _window, cx| this.open_download_dir(cx)),
                     ),
                 ],
             ))
@@ -1954,33 +1933,29 @@ impl DownloadManager {
                 i18n::t(&lang, "set.limits"),
                 String::new(),
                 vec![
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         speed_label(&lang, &self.config),
                         theme.muted,
-                        Self::cycle_speed,
+                        cx.listener(|this, _event, _window, cx| this.cycle_speed(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         connections_label(&lang, &self.config),
                         theme.muted,
-                        Self::cycle_conns,
+                        cx.listener(|this, _event, _window, cx| this.cycle_conns(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         quality_label(&lang, &self.config),
                         theme.muted,
-                        Self::cycle_quality,
+                        cx.listener(|this, _event, _window, cx| this.cycle_quality(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         self.config.language.clone(),
                         theme.muted,
-                        Self::cycle_lang,
+                        cx.listener(|this, _event, _window, cx| this.cycle_lang(cx)),
                     ),
                 ],
             ))
@@ -1989,19 +1964,17 @@ impl DownloadManager {
                 i18n::t(&lang, "set.language"),
                 String::new(),
                 vec![
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         self.config.language.clone(),
                         theme.muted,
-                        Self::cycle_lang,
+                        cx.listener(|this, _event, _window, cx| this.cycle_lang(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.open"),
                         theme.muted,
-                        Self::open_lang_dir,
+                        cx.listener(|this, _event, _window, cx| this.open_lang_dir(cx)),
                     ),
                 ],
             ))
@@ -2010,33 +1983,29 @@ impl DownloadManager {
                 i18n::t(&lang, "set.behavior"),
                 String::new(),
                 vec![
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         on_off(&lang, self.config.organize_by_category),
                         theme.muted,
-                        Self::toggle_organize,
+                        cx.listener(|this, _event, _window, cx| this.toggle_organize(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         on_off(&lang, self.config.clipboard_monitor),
                         theme.muted,
-                        Self::toggle_monitor,
+                        cx.listener(|this, _event, _window, cx| this.toggle_monitor(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         on_off(&lang, self.config.shutdown_after_queue),
                         theme.muted,
-                        Self::toggle_shutdown,
+                        cx.listener(|this, _event, _window, cx| this.toggle_shutdown(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         on_off(&lang, self.config.dark_mode),
                         theme.muted,
-                        Self::toggle_theme,
+                        cx.listener(|this, _event, _window, cx| this.toggle_theme(cx)),
                     ),
                 ],
             ))
@@ -2090,12 +2059,11 @@ impl DownloadManager {
                         |v| &mut v.sched_end,
                         "06:00",
                     )),
-                vec![settings_button(
-                    cx,
+                vec![button(
                     theme,
                     i18n::t(&lang, "tb.apply"),
                     theme.primary,
-                    Self::apply_sched,
+                    cx.listener(|this, _event, _window, cx| this.apply_sched(cx)),
                 )],
             ))
             .child(setting_row(
@@ -2103,26 +2071,23 @@ impl DownloadManager {
                 i18n::t(&lang, "set.video"),
                 tools_value,
                 vec![
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.setup_video"),
                         theme.primary,
-                        Self::setup_video_tools,
+                        cx.listener(|this, _event, _window, cx| this.setup_video_tools(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.browse"),
                         theme.muted,
-                        Self::browse_ytdlp,
+                        cx.listener(|this, _event, _window, cx| this.browse_ytdlp(cx)),
                     ),
-                    settings_button(
-                        cx,
+                    button(
                         theme,
                         i18n::t(&lang, "tb.clear"),
                         theme.muted,
-                        Self::clear_ytdlp,
+                        cx.listener(|this, _event, _window, cx| this.clear_ytdlp(cx)),
                     ),
                 ],
             ))
@@ -2137,12 +2102,11 @@ impl DownloadManager {
                     |v| &mut v.proxy_field,
                     "http://127.0.0.1:8080",
                 ),
-                vec![settings_button(
-                    cx,
+                vec![button(
                     theme,
                     i18n::t(&lang, "tb.apply"),
                     theme.primary,
-                    Self::apply_proxy,
+                    cx.listener(|this, _event, _window, cx| this.apply_proxy(cx)),
                 )],
             ))
             .child(setting_row(
@@ -2156,24 +2120,22 @@ impl DownloadManager {
                     |v| &mut v.repo_field,
                     "owner/name",
                 ),
-                vec![settings_button(
-                    cx,
+                vec![button(
                     theme,
                     i18n::t(&lang, "tb.apply"),
                     theme.primary,
-                    Self::apply_repo,
+                    cx.listener(|this, _event, _window, cx| this.apply_repo(cx)),
                 )],
             ))
             .child(setting_row(
                 theme,
                 i18n::t(&lang, "set.advanced"),
                 config_path,
-                vec![settings_button(
-                    cx,
+                vec![button(
                     theme,
                     i18n::t(&lang, "tb.edit_file"),
                     theme.muted,
-                    Self::open_config_file,
+                    cx.listener(|this, _event, _window, cx| this.open_config_file(cx)),
                 )],
             ))
     }
