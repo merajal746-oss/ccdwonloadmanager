@@ -24,6 +24,9 @@ pub struct AppConfig {
     /// HTTP(S) proxy URL, e.g. `http://127.0.0.1:8080` (cf. XDM ProxyInfo).
     /// `None` (default) means direct connection.
     pub proxy_url: Option<String>,
+    /// Sort finished files into `<dir>/<Category>/` subfolders by extension
+    /// (cf. XDM categories folders). Off by default.
+    pub organize_by_category: bool,
 }
 
 impl Default for AppConfig {
@@ -38,6 +41,7 @@ impl Default for AppConfig {
             speed_limit_kbps: 0,
             enable_speed_limit: false,
             proxy_url: None,
+            organize_by_category: false,
         }
     }
 }

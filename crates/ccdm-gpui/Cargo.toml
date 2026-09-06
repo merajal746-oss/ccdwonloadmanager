@@ -12,5 +12,6 @@ path = "src/main.rs"
 [dependencies]
 ccdm-core = { path = "../ccdm-core" }
 gpui = "0.2.2"
+open = "5"
 reqwest = "0.13.4"
 tokio = { version = "1.53.1", features = ["rt", "time"] }

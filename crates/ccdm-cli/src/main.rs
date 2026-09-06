@@ -20,8 +20,10 @@ use std::sync::{
 use anyhow::Context;
 use clap::{Parser, Subcommands};
 
-use ccdm_core::model::sanitize_file_name;
-use ccdm_core::{AppConfig, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter, Store, http};
+use ccdm_core::model::{resolve_dest, sanitize_file_name};
+use ccdm_core::{
+    AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter, Store, http,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "ccdm-cli", version, about = "ccdwonloadmanager headless downloader")]
@@ -204,7 +206,12 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             let dest = match output {
                 Some(p) => p,
-                None => config.download_dir.join(sanitize_file_name(&info.file_name)),
+                None => resolve_dest(
+                    &config.download_dir,
+                    &info.file_name,
+                    &Category::default_categories(),
+                    config.organize_by_category,
+                ),
             };
             let segments = connections.unwrap_or(config.max_connections).clamp(1, 32);
             eprintln!(
@@ -305,7 +312,12 @@ async fn main() -> anyhow::Result<()> {
                     _ => continue,
                 };
                 store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                let dest = config.download_dir.join(sanitize_file_name(&file_name));
+                let dest = resolve_dest(
+                    &config.download_dir,
+                    &file_name,
+                    &Category::default_categories(),
+                    config.organize_by_category,
+                );
                 eprintln!("starting {one} -> {} ({} segments)", dest.display(), segments);
                 let (res, got, tot) =
                     run_with_retry(&client, &url, &dest, segments, limiter.clone()).await;

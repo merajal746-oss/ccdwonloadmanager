@@ -212,6 +212,24 @@ pub fn sanitize_file_name(name: &str) -> String {
     }
 }
 
+/// Destination for a file: `<dir>/<Category>/<name>` when organizing is on
+/// and the extension matches a category, else `<dir>/<name>`
+/// (cf. XDM categories folders). The name is sanitized first.
+pub fn resolve_dest(
+    download_dir: &std::path::Path,
+    file_name: &str,
+    categories: &[Category],
+    organize: bool,
+) -> std::path::PathBuf {
+    let safe = sanitize_file_name(file_name);
+    if organize {
+        if let Some(category) = Category::for_file_name(categories, &safe) {
+            return download_dir.join(&category.name).join(&safe);
+        }
+    }
+    download_dir.join(&safe)
+}
+
 /// File category used for sorting into subfolders (cf. XDM `Category`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Category {
@@ -306,8 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn with_plan_covers_total() {
-        let e = DownloadEntry::with_plan(
+    fn with_plan_covers_total() {        let e = DownloadEntry::with_plan(
             "x".into(),
             "https://h/f".into(),
             "f".into(),
@@ -318,5 +335,23 @@ mod tests {
         let covered: u64 = e.chunks.iter().map(|c| c.size.unwrap()).sum();
         assert_eq!(covered, 10);
         assert_eq!(e.chunks[0].id, "x#0");
+    }
+
+    #[test]
+    fn resolve_dest_organizes_by_category() {
+        let cats = Category::default_categories();
+        let dir = std::path::Path::new("/dl");
+        assert_eq!(
+            resolve_dest(dir, "movie.mkv", &cats, true),
+            std::path::PathBuf::from("/dl/Video/movie.mkv")
+        );
+        assert_eq!(
+            resolve_dest(dir, "movie.mkv", &cats, false),
+            std::path::PathBuf::from("/dl/movie.mkv")
+        );
+        assert_eq!(
+            resolve_dest(dir, "weird?.sh", &cats, true),
+            std::path::PathBuf::from("/dl/weird_.sh")
+        );
     }
 }

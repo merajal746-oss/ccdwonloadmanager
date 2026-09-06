@@ -5,8 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.4 = in-GUI settings: speed-cap + connections cycling buttons, persisted
-> to `config.json` (shared with the CLI), captured per download at start.
+> v0.5 = categories folders (`Organize` toggle → `<dir>/<Video|…>/`), finished-
+> file actions (**Folder** opens the location, **Again** re-downloads), shared
+> by GUI and CLI via `model::resolve_dest`.
 > The full XDM feature set (HLS/DASH, browser integration, video converter,
 > scheduler, …) is a roadmap, ported module by module (see below).
 
@@ -89,7 +90,7 @@ Config lives in `<config-dir>/ccdm/config.json`, the queue in
 
 - [x] Live engine ↔ GPUI wiring (progress bars, pause/resume buttons)
 - [x] In-GUI speed-limit control + per-download connection setting
-- [ ] Categories folders, finished-file actions (open folder, re-download)
+- [x] Categories folders, finished-file actions (open folder, re-download)
 - [ ] HLS (m3u8) + DASH (mpd) downloaders
 - [ ] Browser integration (native-messaging host + extension)
 - [ ] Clipboard monitor, queue scheduler, shutdown-on-finish
@@ -101,3 +102,6 @@ Run `ccdm-gpui`. Copy a download link anywhere, hit **Add from clipboard**
 (probes the URL in the background), then **Start**. **Pause** cancels at the
 next chunk boundary; **Resume** continues from the `.part` files. The queue
 is the same file the CLI uses, so `ccdm-cli list` sees GUI downloads too.
+Finished rows offer **Folder** (reveals the file location) and **Again**
+(deletes outputs and downloads afresh). The **Organize** toggle sorts new
+downloads into `Video/`, `Documents/`, … subfolders.

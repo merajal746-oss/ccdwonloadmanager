@@ -22,7 +22,7 @@ use gpui::{
     WindowOptions, div, prelude::*, px, rgb, size,
 };
 
-use ccdm_core::model::sanitize_file_name;
+use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::speed_limiter::now_ms;
 use ccdm_core::{
     AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter,
@@ -135,8 +135,7 @@ const SPEED_STEPS: &[u32] = &[0, 256, 512, 1024, 2048, 5120, 10240];
 /// Per-download connection steps cycled by the toolbar button.
 const CONN_STEPS: &[usize] = &[1, 2, 4, 8, 16, 32];
 
-fn speed_label(config: &AppConfig) -> String {
-    if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
+fn speed_label(config: &AppConfig) -> String {    if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
         "Speed: unlimited".to_string()
     } else if config.speed_limit_kbps >= 1024 {
         format!(
@@ -146,6 +145,10 @@ fn speed_label(config: &AppConfig) -> String {
     } else {
         format!("Speed: {} KiB/s", config.speed_limit_kbps)
     }
+}
+
+fn organize_label(config: &AppConfig) -> String {
+    format!("Organize: {}", if config.organize_by_category { "on" } else { "off" })
 }
 
 /// Clickable label. `on_click` receives the mouse-down event like the
@@ -186,7 +189,12 @@ fn run_download(
             return;
         }
     };
-    let dest = config.download_dir.join(sanitize_file_name(&worker.file_name));
+    let dest = resolve_dest(
+        &config.download_dir,
+        &worker.file_name,
+        &Category::default_categories(),
+        config.organize_by_category,
+    );
     let downloaded = worker.downloaded.clone();
     let total = worker.total.clone();
     let res = runtime.block_on(http::download_segmented(
@@ -391,6 +399,59 @@ impl DownloadManager {
             }
             None => self.notice = "no config dir on this platform".to_string(),
         }
+    }
+
+    /// Flip organize-into-category-folders; persists immediately.
+    fn toggle_organize(&mut self, cx: &mut Context<Self>) {
+        self.config.organize_by_category = !self.config.organize_by_category;
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Open the containing folder of a row's file in the file manager.
+    fn reveal_row(&mut self, id: String, cx: &mut Context<Self>) {
+        let dest = self.find(&id).map(|worker| {
+            resolve_dest(
+                &self.config.download_dir,
+                &worker.file_name,
+                &self.categories,
+                self.config.organize_by_category,
+            )
+        });
+        match dest {
+            Some(path) => {
+                let target = path.parent().map(|parent| parent.to_path_buf()).unwrap_or(path);
+                if let Err(e) = open::that(&target) {
+                    self.notice = format!("cannot open folder: {e}");
+                }
+            }
+            None => self.notice = "row not found".to_string(),
+        }
+        cx.notify();
+    }
+
+    /// Delete outputs and download again from scratch.
+    fn redownload_row(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(dest) = self.find(&id).map(|worker| {
+            resolve_dest(
+                &self.config.download_dir,
+                &worker.file_name,
+                &self.categories,
+                self.config.organize_by_category,
+            )
+        }) {
+            let _ = std::fs::remove_file(&dest);
+            for part in 0..32 {
+                let _ = std::fs::remove_file(std::path::PathBuf::from(format!(
+                    "{}.part{part}",
+                    dest.display()
+                )));
+            }
+            if let Some(worker) = self.workers.iter().find(|w| w.id == id) {
+                worker.downloaded.store(0, Ordering::Relaxed);
+            }
+        }
+        self.start_row(id, cx);
     }
 
     fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {        if let Some(name) = self.find(&id).map(|worker| {
@@ -602,6 +663,11 @@ impl Render for DownloadManager {
                         0x585b70,
                         cx.listener(|this, _event, _window, cx| this.cycle_conns(cx)),
                     ))
+                    .child(button(
+                        organize_label(&self.config),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.toggle_organize(cx)),
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -631,43 +697,75 @@ impl Render for DownloadManager {
                             RowStatus::Failed => format!("failed — {}", row.detail),
                             status => status.label().to_string(),
                         };
-                        let start_id = row.id.clone();
+                        let mut actions = Vec::new();
+                        match (row.status, row.running) {
+                            (RowStatus::Downloading, _) => {
+                                let id = row.id.clone();
+                                actions.push(button(
+                                    "Pause".to_string(),
+                                    0xf38ba8,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.pause_row(id.clone(), cx);
+                                    }),
+                                ));
+                            }
+                            (RowStatus::Finished, _) => {
+                                let folder_id = row.id.clone();
+                                actions.push(button(
+                                    "Folder".to_string(),
+                                    0x89b4fa,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.reveal_row(folder_id.clone(), cx);
+                                    }),
+                                ));
+                                let again_id = row.id.clone();
+                                actions.push(button(
+                                    "Again".to_string(),
+                                    0x585b70,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.redownload_row(again_id.clone(), cx);
+                                    }),
+                                ));
+                            }
+                            (RowStatus::Failed, _) => {
+                                let id = row.id.clone();
+                                actions.push(button(
+                                    "Retry".to_string(),
+                                    0x89b4fa,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.start_row(id.clone(), cx);
+                                    }),
+                                ));
+                            }
+                            (RowStatus::Paused, _) => {
+                                let id = row.id.clone();
+                                actions.push(button(
+                                    "Resume".to_string(),
+                                    0x89b4fa,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.start_row(id.clone(), cx);
+                                    }),
+                                ));
+                            }
+                            _ => {
+                                let id = row.id.clone();
+                                actions.push(button(
+                                    "Start".to_string(),
+                                    0x89b4fa,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.start_row(id.clone(), cx);
+                                    }),
+                                ));
+                            }
+                        }
                         let remove_id = row.id.clone();
-                        let action = match (row.status, row.running) {
-                            (RowStatus::Downloading, _) => button(
-                                "Pause".to_string(),
-                                0xf38ba8,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.pause_row(start_id.clone(), cx);
-                                }),
-                            ),
-                            (RowStatus::Finished, _) => button(
-                                "done".to_string(),
-                                0x313244,
-                                cx.listener(|_this, _event, _window, cx| cx.notify()),
-                            ),
-                            (RowStatus::Failed, _) => button(
-                                "Retry".to_string(),
-                                0x89b4fa,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.start_row(start_id.clone(), cx);
-                                }),
-                            ),
-                            (RowStatus::Paused, _) => button(
-                                "Resume".to_string(),
-                                0x89b4fa,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.start_row(start_id.clone(), cx);
-                                }),
-                            ),
-                            _ => button(
-                                "Start".to_string(),
-                                0x89b4fa,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.start_row(start_id.clone(), cx);
-                                }),
-                            ),
-                        };
+                        actions.push(button(
+                            "Remove".to_string(),
+                            0x585b70,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.remove_row(remove_id.clone(), cx);
+                            }),
+                        ));
                         div()
                             .flex()
                             .flex_col()
@@ -727,15 +825,7 @@ impl Render for DownloadManager {
                                     .truncate()
                                     .child(row.url.clone()),
                             )
-                            .child(
-                                div().flex().gap_2().child(action).child(button(
-                                    "Remove".to_string(),
-                                    0x585b70,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        this.remove_row(remove_id.clone(), cx);
-                                    }),
-                                )),
-                            )
+                            .child(div().flex().gap_2().children(actions))
                     },
                 ))
             })
