@@ -5,9 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.7 = browser integration: native-messaging host (`ccdm-host --stdio`,
-> `install`, `manifest`), MV3 extension for Chrome/Edge/Firefox that takes
-> over downloads, GUI live-imports browser-queued URLs.
+> v0.8 = clipboard monitor (auto-queues copied links), download scheduler
+> (weekly window, `--force`/`--wait`, GUI Sched toggle), shutdown-on-finish
+> (`--shutdown`, GUI toggle).
 
 ## What works today
 
@@ -35,7 +35,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media (HLS/DASH), browser protocol
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media, browser, schedule, power
 crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
 crates/ccdm-host   browser native-messaging host (--stdio/install/manifest)
@@ -63,10 +63,11 @@ port its *concepts* clean-room (no copied code):
 | Progressive/adaptive HTTP downloaders | `http::{probe, download_with_resume, download_segmented}` |
 | HLS/DASH, `MediaParser` | `media::{parse_master, parse_media, parse_mpd, download_media, download_auto}` (encrypted HLS + live MPD refused with `Unsupported`) |
 | Browser monitoring, native host | `browser::{read_message, write_message, handle_request}` + `ccdm-host` + `ext/` MV3 bridge |
+| Scheduler, shutdown | `schedule::Schedule` (weekly window), `power::shutdown_host`, CLI `--force/--wait/--shutdown` |
+| Clipboard monitor | GUI toggle, polled in the refresh loop, auto-probes copied links |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
-Still to port: FFmpeg wrapper, clipboard monitor, scheduler
-(`DownloadSchedule`), updater, translations, themes.
+Still to port: FFmpeg wrapper, updater, translations, themes.
 
 License: **GPL-2.0-only** (compatible with XDM's GPL-2.0). See `LICENSE`.
 
@@ -140,5 +141,5 @@ normally. **Speed** and
 - [x] Categories folders, finished-file actions (open folder, re-download)
 - [x] HLS (m3u8) + DASH (mpd) downloaders
 - [x] Browser integration (native-messaging host + extension)
-- [ ] Clipboard monitor, queue scheduler, shutdown-on-finish
+- [x] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [ ] Video probe/convert via system ffmpeg, updater, translations

@@ -27,6 +27,13 @@ pub struct AppConfig {
     /// Sort finished files into `<dir>/<Category>/` subfolders by extension
     /// (cf. XDM categories folders). Off by default.
     pub organize_by_category: bool,
+    /// Only start downloads inside this weekly window (cf. XDM scheduler).
+    /// `None` (default) means no restriction.
+    pub schedule: Option<crate::Schedule>,
+    /// Watch the clipboard and auto-queue copied links (GUI).
+    pub clipboard_monitor: bool,
+    /// Power off the machine when the queue drains cleanly.
+    pub shutdown_after_queue: bool,
 }
 
 impl Default for AppConfig {
@@ -42,6 +49,9 @@ impl Default for AppConfig {
             enable_speed_limit: false,
             proxy_url: None,
             organize_by_category: false,
+            schedule: None,
+            clipboard_monitor: false,
+            shutdown_after_queue: false,
         }
     }
 }

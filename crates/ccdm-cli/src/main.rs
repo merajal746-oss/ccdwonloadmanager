@@ -69,6 +69,15 @@ enum Commands {
         /// Max connections/segments (default: config value).
         #[arg(short, long)]
         connections: Option<usize>,
+        /// Ignore the configured schedule window.
+        #[arg(long)]
+        force: bool,
+        /// Wait until the schedule window opens instead of exiting.
+        #[arg(long)]
+        wait: bool,
+        /// Power off the machine when the queue drains cleanly.
+        #[arg(long)]
+        shutdown: bool,
     },
 }
 
@@ -282,7 +291,23 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("stored in {}", store.path().display());
         }
-        Commands::Start { id, connections } => {
+        Commands::Start { id, connections, force, wait, shutdown } => {
+            if let Some(schedule) = &config.schedule {
+                if !force && !schedule.allows_now() {
+                    if wait {
+                        println!("waiting for scheduled window ({})…", schedule.describe());
+                        while !schedule.allows_now() {
+                            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                        }
+                    } else {
+                        println!(
+                            "outside scheduled window ({}); rerun with --force or --wait",
+                            schedule.describe()
+                        );
+                        return Ok(());
+                    }
+                }
+            }
             let mut store = Store::load().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             if let Some(one) = &id {
                 if store.queue().get(one).is_none() {
@@ -348,6 +373,12 @@ async fn main() -> anyhow::Result<()> {
                 store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             }
             println!("finished: {done} ok, {failed} failed");
+            if shutdown && failed == 0 && done > 0 {
+                println!("queue complete, shutting down in 60s…");
+                if let Err(e) = ccdm_core::power::shutdown_host(60) {
+                    eprintln!("shutdown failed: {e}");
+                }
+            }
         }
     }
     Ok(())

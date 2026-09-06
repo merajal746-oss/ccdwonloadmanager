@@ -25,8 +25,8 @@ use gpui::{
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::speed_limiter::now_ms;
 use ccdm_core::{
-    AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter,
-    Store, http, media,
+    AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, Schedule, SharedLimiter,
+    SpeedLimiter, Store, http, media,
 };
 
 /// Engine-side state of one row.
@@ -151,6 +151,21 @@ fn organize_label(config: &AppConfig) -> String {
     format!("Organize: {}", if config.organize_by_category { "on" } else { "off" })
 }
 
+fn monitor_label(config: &AppConfig) -> String {
+    format!("Monitor: {}", if config.clipboard_monitor { "on" } else { "off" })
+}
+
+fn sched_label(config: &AppConfig) -> String {
+    match &config.schedule {
+        Some(schedule) => format!("Sched: {}", schedule.describe()),
+        None => "Sched: off".to_string(),
+    }
+}
+
+fn shutdown_label(config: &AppConfig) -> String {
+    format!("Shutdown: {}", if config.shutdown_after_queue { "on" } else { "off" })
+}
+
 /// Clickable label. `on_click` receives the mouse-down event like the
 /// official `input.rs` example does.
 fn button(
@@ -247,6 +262,7 @@ struct DownloadManager {
     store: Store,
     saved: HashMap<String, String>,
     store_mtime: Option<std::time::SystemTime>,
+    last_clipboard: String,
 }
 
 impl DownloadManager {
@@ -265,8 +281,10 @@ impl DownloadManager {
                 let alive = view.update(cx, |this, cx| {
                     this.drain_events();
                     this.sync_from_store();
+                    this.poll_clipboard(cx);
                     this.refresh_rows();
                     this.persist_if_changed();
+                    this.poll_shutdown();
                     cx.notify();
                 });
                 if alive.is_err() {
@@ -334,6 +352,7 @@ impl DownloadManager {
             store,
             saved,
             store_mtime: None,
+            last_clipboard: String::new(),
         }
     }
 
@@ -342,6 +361,16 @@ impl DownloadManager {
     }
 
     fn start_row(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(schedule) = &self.config.schedule {
+            if !schedule.allows_now() {
+                self.notice = format!(
+                    "outside scheduled window ({}); toggle Sched to run now",
+                    schedule.describe()
+                );
+                cx.notify();
+                return;
+            }
+        }
         let Some(worker) = self.find(&id).cloned() else {
             return;
         };
@@ -409,6 +438,73 @@ impl DownloadManager {
         self.config.organize_by_category = !self.config.organize_by_category;
         self.save_config();
         cx.notify();
+    }
+
+    fn toggle_monitor(&mut self, cx: &mut Context<Self>) {
+        self.config.clipboard_monitor = !self.config.clipboard_monitor;
+        self.save_config();
+        cx.notify();
+    }
+
+    fn toggle_sched(&mut self, cx: &mut Context<Self>) {
+        self.config.schedule = match self.config.schedule {
+            Some(_) => None,
+            None => Some(Schedule::nightly()),
+        };
+        self.save_config();
+        cx.notify();
+    }
+
+    fn toggle_shutdown(&mut self, cx: &mut Context<Self>) {
+        self.config.shutdown_after_queue = !self.config.shutdown_after_queue;
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Clipboard monitor: auto-queue freshly copied links (cf. XDM).
+    fn poll_clipboard(&mut self, cx: &mut Context<Self>) {
+        if !self.config.clipboard_monitor {
+            return;
+        }
+        let url = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let Some(url) = url else { return };
+        if url == self.last_clipboard {
+            return;
+        }
+        self.last_clipboard = url.clone();
+        if !url.to_lowercase().starts_with("http") {
+            return;
+        }
+        self.add_url(url, cx);
+    }
+
+    /// Power off once a non-empty queue drains cleanly (cf. XDM).
+    fn poll_shutdown(&mut self) {
+        if !self.config.shutdown_after_queue || self.workers.is_empty() {
+            return;
+        }
+        let all_done = self.workers.iter().all(|w| {
+            matches!(
+                *w.status.lock().unwrap(),
+                RowStatus::Finished | RowStatus::Failed
+            )
+        });
+        let any_finished = self
+            .workers
+            .iter()
+            .any(|w| matches!(*w.status.lock().unwrap(), RowStatus::Finished));
+        if all_done && any_finished {
+            self.config.shutdown_after_queue = false;
+            self.save_config();
+            self.notice = "queue complete, shutting down in 60s…".to_string();
+            if let Err(e) = ccdm_core::power::shutdown_host(60) {
+                self.notice = format!("shutdown failed: {e}");
+            }
+        }
     }
 
     /// Open the containing folder of a row's file in the file manager.
@@ -497,6 +593,12 @@ impl DownloadManager {
             cx.notify();
             return;
         };
+        self.add_url(url, cx);
+    }
+
+    /// Validate + probe `url` in a worker thread (shared by the clipboard
+    /// button and the clipboard monitor).
+    fn add_url(&mut self, url: String, cx: &mut Context<Self>) {
         if self.workers.iter().any(|w| w.url == url) {
             self.notice = "that URL is already in the list".to_string();
             cx.notify();
@@ -716,6 +818,33 @@ impl Render for DownloadManager {
                             .text_xs()
                             .text_color(rgb(0x6c7086))
                             .child("apply to newly started downloads"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(button(
+                        monitor_label(&self.config),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.toggle_monitor(cx)),
+                    ))
+                    .child(button(
+                        sched_label(&self.config),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.toggle_sched(cx)),
+                    ))
+                    .child(button(
+                        shutdown_label(&self.config),
+                        0x585b70,
+                        cx.listener(|this, _event, _window, cx| this.toggle_shutdown(cx)),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(rgb(0x6c7086))
+                            .child("monitor adds copied links • sched gates starts"),
                     ),
             )
             .child(if self.rows.is_empty() {
