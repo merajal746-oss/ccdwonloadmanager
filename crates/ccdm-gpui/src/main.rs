@@ -728,7 +728,7 @@ impl DownloadManager {
     fn cycle_row_conns(&mut self, id: String, cx: &mut Context<Self>) {
         const STEPS: &[Option<usize>] =
             &[None, Some(1), Some(2), Some(4), Some(8), Some(16), Some(32)];
-        if let Some(worker) = self.workers.iter().find(|w| w.id == id) {
+        if let Some(worker) = self.workers.iter_mut().find(|w| w.id == id) {
             if worker.alive.load(Ordering::SeqCst) {
                 return;
             }
