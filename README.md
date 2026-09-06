@@ -5,9 +5,10 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.11 = one-click video setup (yt-dlp + ffmpeg auto-install, no yt-dlp
-> crate — see license note), ultimate Settings screen (every option clickable,
-> folder picker, config editor shortcut), baby-easy empty states.
+> v0.12 = ultimate GUI: full Settings screen (every option clickable —
+> folder picker, proxy/repo text fields, schedule days + HH:MM editor,
+> yt-dlp locate/clear, language files, config shortcut), live per-row
+> speed + ETA, totals footer, dark/light themes everywhere.
 
 ## What works today
 
@@ -17,6 +18,9 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 - **Add from clipboard**: probes the URL in the background, dedupes
 - Toolbar: speed / connections / organize / monitor / sched / shutdown / theme / quality
 - Watch pages paste-and-go: auto-resolved via yt-dlp to direct files
+- Settings: download folder, speed, connections, quality, language, toggles,
+  schedule days + times, yt-dlp tools, proxy, update repo — all clickable
+- Live per-row speed + ETA, totals footer in the queue
 - Finished rows: **Folder**, **Again**, **MP3** (ffmpeg convert)
 - Translated UI, dark/light themes, auto-persisted queue
 
@@ -174,3 +178,4 @@ normally. **Speed** and
 - [x] Video probe/convert via system ffmpeg, updater, translations, themes
 - [x] YouTube-style video pages via yt-dlp (CLI `video`, GUI auto-resolve)
 - [x] One-click dependency setup + ultimate Settings screen
+- [x] Advanced made easy: every setting in the GUI + live speeds/ETA

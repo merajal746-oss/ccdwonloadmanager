@@ -18,8 +18,8 @@ use std::sync::{
 use std::time::Duration;
 
 use gpui::{
-    App, Application, Bounds, Context, Div, MouseButton, SharedString, Window, WindowBounds,
-    WindowOptions, div, prelude::*, px, rgb, size,
+    App, Application, Bounds, Context, CursorStyle, Div, FocusHandle, KeyDownEvent, MouseButton,
+    SharedString, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
 
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
@@ -105,6 +105,8 @@ impl Worker {
                 t => Some(t),
             },
             running: self.alive.load(Ordering::SeqCst),
+            speed_bps: 0,
+            eta_secs: None,
         }
     }
 }
@@ -119,6 +121,8 @@ struct RowView {
     downloaded: u64,
     total: Option<u64>,
     running: bool,
+    speed_bps: u64,
+    eta_secs: Option<u64>,
 }
 
 /// Messages from worker threads to the UI thread.
@@ -294,6 +298,161 @@ fn settings_button(
     )
 }
 
+/// Single-line text editor for settings fields (proxy URLs, repo names,
+/// HH:MM times). Char-boundary-safe cursor math throughout.
+struct TextField {
+    text: String,
+    cursor: usize,
+    focus: FocusHandle,
+}
+
+impl TextField {
+    fn new(cx: &mut Context<DownloadManager>, initial: String) -> Self {
+        let mut field = Self {
+            text: String::new(),
+            cursor: 0,
+            focus: cx.focus_handle(),
+        };
+        field.set(initial);
+        field
+    }
+
+    fn set(&mut self, text: String) {
+        self.text = text;
+        self.cursor = self.text.len();
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        self.text.insert(self.cursor, ch);
+        self.cursor += ch.len_utf8();
+    }
+
+    fn backspace(&mut self) {
+        if let Some(prev) = self.text[..self.cursor].chars().next_back() {
+            self.cursor -= prev.len_utf8();
+            self.text.remove(self.cursor);
+        }
+    }
+
+    fn delete_forward(&mut self) {
+        if let Some(next) = self.text[self.cursor..].chars().next() {
+            self.text.drain(self.cursor..self.cursor + next.len_utf8());
+        }
+    }
+
+    fn move_left(&mut self) {
+        if let Some(prev) = self.text[..self.cursor].chars().next_back() {
+            self.cursor -= prev.len_utf8();
+        }
+    }
+
+    fn move_right(&mut self) {
+        if let Some(next) = self.text[self.cursor..].chars().next() {
+            self.cursor += next.len_utf8();
+        }
+    }
+
+    /// Handle a key; true when consumed (caller should `cx.notify()`).
+    /// Modified keys (ctrl/alt/cmd) and control characters are ignored.
+    fn on_key(&mut self, event: &KeyDownEvent) -> bool {
+        match event.keystroke.key.as_str() {
+            "backspace" => {
+                self.backspace();
+                true
+            }
+            "delete" => {
+                self.delete_forward();
+                true
+            }
+            "left" => {
+                self.move_left();
+                true
+            }
+            "right" => {
+                self.move_right();
+                true
+            }
+            "home" => {
+                self.cursor = 0;
+                true
+            }
+            "end" => {
+                self.cursor = self.text.len();
+                true
+            }
+            _ => match event.keystroke.key_char.as_deref() {
+                Some(text) if !text.is_empty() && text.chars().all(|c| !c.is_control()) => {
+                    for ch in text.chars() {
+                        self.insert_char(ch);
+                    }
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+
+    /// Display text with a caret when focused, placeholder otherwise.
+    fn display(&self, focused: bool, placeholder: &str) -> (String, bool) {
+        if self.text.is_empty() && !focused {
+            return (placeholder.to_string(), true);
+        }
+        let mut shown = self.text.clone();
+        if focused {
+            shown.insert(self.cursor, '|');
+        }
+        (shown, false)
+    }
+}
+
+/// Visual box for a settings text field (key/mouse listeners attached by
+/// the caller, which owns `cx`).
+fn field_box(theme: Theme, display: String, empty: bool, focused: bool) -> Div {
+    div()
+        .flex_1()
+        .px_2()
+        .py_1()
+        .bg(rgb(theme.track))
+        .rounded_lg()
+        .border_1()
+        .border_color(rgb(if focused { theme.accent } else { theme.faint }))
+        .text_sm()
+        .cursor(CursorStyle::IBeam)
+        .text_color(rgb(if empty { theme.faint } else { theme.text }))
+        .truncate()
+        .child(display)
+}
+
+/// `1024` → `1.0 KiB`; byte counts for people.
+fn fmt_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = n as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < 4 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{n} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// `65` → `01:05`; ETAs for people.
+fn fmt_eta(total_secs: u64) -> String {
+    let (hours, minutes, secs) = (total_secs / 3600, total_secs % 3600 / 60, total_secs % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{secs:02}")
+    } else {
+        format!("{minutes:02}:{secs:02}")
+    }
+}
+
+fn minutes_to_hhmm(minutes: u16) -> String {
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
 /// Blocking worker: probe is already done, download to `dest` with resume.
 fn run_download(
     worker: Worker,
@@ -375,6 +534,11 @@ struct DownloadManager {
     store_mtime: Option<std::time::SystemTime>,
     last_clipboard: String,
     screen: Screen,
+    speed_prev: HashMap<String, (u64, std::time::Instant, u64)>,
+    proxy_field: TextField,
+    repo_field: TextField,
+    sched_start: TextField,
+    sched_end: TextField,
 }
 
 impl DownloadManager {
@@ -446,6 +610,17 @@ impl DownloadManager {
             "no speed cap".to_string()
         };
         let theme = if config.dark_mode { THEME_DARK } else { THEME_LIGHT };
+        let (sched_start_text, sched_end_text) = match &config.schedule {
+            Some(schedule) => (
+                minutes_to_hhmm(schedule.start_minutes),
+                minutes_to_hhmm(schedule.end_minutes),
+            ),
+            None => ("01:00".to_string(), "06:00".to_string()),
+        };
+        let proxy_field = TextField::new(cx, config.proxy_url.clone().unwrap_or_default());
+        let repo_field = TextField::new(cx, config.update_repo.clone().unwrap_or_default());
+        let sched_start = TextField::new(cx, sched_start_text);
+        let sched_end = TextField::new(cx, sched_end_text);
         if let Some(repo) = config.update_repo.clone() {
             let update_tx = tx.clone();
             let update_lang = config.language.clone();
@@ -492,6 +667,11 @@ impl DownloadManager {
             store_mtime: None,
             last_clipboard: String::new(),
             screen: Screen::Queue,
+            speed_prev: HashMap::new(),
+            proxy_field,
+            repo_field,
+            sched_start,
+            sched_end,
         }
     }
 
@@ -576,6 +756,90 @@ impl DownloadManager {
         }
     }
 
+    /// Apply the proxy field (empty clears it) and rebuild the client.
+    fn apply_proxy(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        let value = self.proxy_field.text.trim().to_string();
+        self.config.proxy_url = if value.is_empty() { None } else { Some(value) };
+        if let Ok(client) = http::build_client_with(&self.config) {
+            self.client = client;
+        }
+        self.save_config();
+        self.notice = i18n::t(&lang, "n.saved");
+        cx.notify();
+    }
+
+    /// Apply the update-repo field (empty disables release checks).
+    fn apply_repo(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        let value = self.repo_field.text.trim().to_string();
+        self.config.update_repo = if value.is_empty() { None } else { Some(value) };
+        self.save_config();
+        self.notice = i18n::t(&lang, "n.saved");
+        cx.notify();
+    }
+
+    /// Apply the HH:MM schedule fields (keeps existing days, if any).
+    fn apply_sched(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        match (
+            Schedule::parse_hhmm(&self.sched_start.text),
+            Schedule::parse_hhmm(&self.sched_end.text),
+        ) {
+            (Some(start), Some(end)) => {
+                let days = self.config.schedule.map(|s| s.days).unwrap_or(0x7F);
+                self.config.schedule = Some(Schedule {
+                    days,
+                    start_minutes: start,
+                    end_minutes: end,
+                });
+                self.save_config();
+                self.notice = i18n::t(&lang, "n.saved");
+            }
+            _ => self.notice = i18n::t(&lang, "n.sched_bad"),
+        }
+        cx.notify();
+    }
+
+    /// Flip one schedule weekday (creates the nightly window if off).
+    fn toggle_sched_day(&mut self, day: u8, cx: &mut Context<Self>) {
+        let schedule = self.config.schedule.get_or_insert_with(Schedule::nightly);
+        schedule.days ^= 1 << day.min(7);
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Locate the yt-dlp binary with a native file dialog.
+    fn browse_ytdlp(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            self.config.ytdlp_path = Some(path.display().to_string());
+            self.save_config();
+        }
+        cx.notify();
+    }
+
+    /// Forget the yt-dlp path (auto-detect / setup takes over).
+    fn clear_ytdlp(&mut self, cx: &mut Context<Self>) {
+        self.config.ytdlp_path = None;
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Open the translations folder (created on demand).
+    fn open_lang_dir(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        match ccdm_core::i18n::lang_dir() {
+            Some(dir) => {
+                let _ = std::fs::create_dir_all(&dir);
+                if let Err(e) = open::that(&dir) {
+                    self.notice = i18n::format(&lang, "n.reveal", &[("e", &e.to_string())]);
+                }
+            }
+            None => self.notice = i18n::t(&lang, "n.no_cfgdir"),
+        }
+        cx.notify();
+    }
+
     /// Flip organize-into-category-folders; persists immediately.
     fn toggle_organize(&mut self, cx: &mut Context<Self>) {
         self.config.organize_by_category = !self.config.organize_by_category;
@@ -634,6 +898,36 @@ impl DownloadManager {
         cx.notify();
     }
 
+    /// Settings text field bound to one view field: focus on click, type to
+    /// edit. `pick`/`mutate` select the field for shared/mutable access.
+    fn field_box_for(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+        theme: Theme,
+        pick: fn(&DownloadManager) -> &TextField,
+        mutate: fn(&mut DownloadManager) -> &mut TextField,
+        placeholder: &str,
+    ) -> Div {
+        let focused = pick(self).focus.is_focused(window);
+        let (text, empty) = pick(self).display(focused, placeholder);
+        field_box(theme, text, empty, focused)
+            .track_focus(&pick(self).focus)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    window.focus(&mutate(this).focus);
+                    cx.notify();
+                }),
+            )
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let field = mutate(this);
+                if field.focus.is_focused(window) && field.on_key(event) {
+                    cx.notify();
+                }
+            }))
+    }
+
     /// Pick the download folder with a native dialog.
     fn browse_download_dir(&mut self, cx: &mut Context<Self>) {
         let start = self.config.download_dir.clone();
@@ -666,6 +960,37 @@ impl DownloadManager {
                     let _ = self.config.save(&path);
                 }
                 if let Err(e) = open::that(&path) {
+                    self.notice = i18n::format(&lang, "n.reveal", &[("e", &e.to_string())]);
+                }
+            }
+            None => self.notice = i18n::t(&lang, "n.no_cfgdir"),
+        }
+        cx.notify();
+    }
+
+    /// Locate the yt-dlp binary with a native file dialog.
+    fn browse_ytdlp(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            self.config.ytdlp_path = Some(path.display().to_string());
+            self.save_config();
+        }
+        cx.notify();
+    }
+
+    /// Forget the yt-dlp path (auto-detect / setup takes over).
+    fn clear_ytdlp(&mut self, cx: &mut Context<Self>) {
+        self.config.ytdlp_path = None;
+        self.save_config();
+        cx.notify();
+    }
+
+    /// Open the translations folder (created on demand).
+    fn open_lang_dir(&mut self, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        match ccdm_core::i18n::lang_dir() {
+            Some(dir) => {
+                let _ = std::fs::create_dir_all(&dir);
+                if let Err(e) = open::that(&dir) {
                     self.notice = i18n::format(&lang, "n.reveal", &[("e", &e.to_string())]);
                 }
             }
@@ -1105,7 +1430,39 @@ impl DownloadManager {
     }
 
     fn refresh_rows(&mut self) {
-        self.rows = self.workers.iter().map(Worker::snapshot).collect();
+        let snapshots: Vec<RowView> = self.workers.iter().map(Worker::snapshot).collect();
+        let now = std::time::Instant::now();
+        let mut rows = Vec::with_capacity(snapshots.len());
+        for mut row in snapshots {
+            let slot = self
+                .speed_prev
+                .entry(row.id.clone())
+                .or_insert((0, now, 0));
+            let elapsed = now.duration_since(slot.1).as_secs_f32();
+            let instant = if elapsed > 0.01 {
+                row.downloaded.saturating_sub(slot.0) as f32 / elapsed
+            } else {
+                0.0
+            };
+            let smooth = slot.2 as f32 * 0.6 + instant * 0.4;
+            *slot = (row.downloaded, now, smooth as u64);
+            row.speed_bps = if row.status == RowStatus::Downloading {
+                smooth as u64
+            } else {
+                0
+            };
+            row.eta_secs = match row.total {
+                Some(total) if total > row.downloaded && smooth > 100.0 => {
+                    Some(((total - row.downloaded) as f32 / smooth) as u64)
+                }
+                _ => None,
+            };
+            rows.push(row);
+        }
+        let live: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        self.speed_prev
+            .retain(|id, _| live.iter().any(|live_id| live_id == id));
+        self.rows = rows;
     }
 
     fn persist(&mut self) {
@@ -1162,10 +1519,10 @@ impl DownloadManager {
 }
 
 impl Render for DownloadManager {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.screen {
             Screen::Queue => self.render_queue(cx),
-            Screen::Settings => self.render_settings(cx),
+            Screen::Settings => self.render_settings(window, cx),
         }
     }
 }
@@ -1174,7 +1531,7 @@ impl Render for DownloadManager {
 fn setting_row(
     theme: Theme,
     label: String,
-    value: String,
+    value: impl IntoElement,
     actions: Vec<impl IntoElement>,
 ) -> Div {
     div()
@@ -1201,6 +1558,14 @@ impl DownloadManager {
         let total = self.rows.len();
         let active = self.rows.iter().filter(|row| row.running).count();
         let theme = self.theme;
+        let mut total_down = 0u64;
+        let mut total_size = 0u64;
+        let mut total_speed = 0u64;
+        for row in &self.rows {
+            total_down += row.downloaded;
+            total_size += row.total.unwrap_or(0);
+            total_speed += row.speed_bps;
+        }
         div()
             .flex()
             .flex_col()
@@ -1348,9 +1713,24 @@ impl DownloadManager {
                             _ => 0.0,
                         }
                         .clamp(0.0, 1.0);
+                        let eta = row.eta_secs.map(fmt_eta).unwrap_or_else(|| "—".to_string());
+                        let speed = format!("{}/s", fmt_bytes(row.speed_bps));
                         let progress_text = match row.total {
-                            Some(t) if t > 0 => format!("{:.0}% of {t} bytes", frac * 100.0),
-                            _ => format!("{} bytes", row.downloaded),
+                            Some(t) if t > 0 => i18n::format(
+                                &lang,
+                                "row.progress",
+                                &[
+                                    ("p", &format!("{:.0}", frac * 100.0)),
+                                    ("t", &fmt_bytes(t)),
+                                    ("s", &speed),
+                                    ("e", &eta),
+                                ],
+                            ),
+                            _ => i18n::format(
+                                &lang,
+                                "row.progress_na",
+                                &[("b", &fmt_bytes(row.downloaded)), ("s", &speed)],
+                            ),
                         };
                         let status_text = match row.status {
                             RowStatus::Failed => {
@@ -1508,9 +1888,32 @@ impl DownloadManager {
                     },
                 ))
             })
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .px_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(rgb(theme.faint))
+                            .child(i18n::format(
+                                &lang,
+                                "app.footer",
+                                &[
+                                    ("n", &total.to_string()),
+                                    ("a", &active.to_string()),
+                                    ("d", &fmt_bytes(total_down)),
+                                    ("t", &fmt_bytes(total_size)),
+                                    ("s", &format!("{}/s", fmt_bytes(total_speed))),
+                                ],
+                            )),
+                    ),
+            )
     }
 
-    fn render_settings(&mut self, cx: &mut Context<Self>) -> Div {
+    fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let lang = self.config.language.clone();
         let theme = self.theme;
         let tools_value = format!(
@@ -1566,122 +1969,221 @@ impl DownloadManager {
             ))
             .child(setting_row(
                 theme,
-                i18n::t(&lang, "set.speed"),
+                i18n::t(&lang, "set.limits"),
                 String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    speed_label(&lang, &self.config),
-                    theme.muted,
-                    Self::cycle_speed,
-                )],
-            ))
-            .child(setting_row(
-                theme,
-                i18n::t(&lang, "set.connections"),
-                String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    connections_label(&lang, &self.config),
-                    theme.muted,
-                    Self::cycle_conns,
-                )],
-            ))
-            .child(setting_row(
-                theme,
-                i18n::t(&lang, "set.quality"),
-                String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    quality_label(&lang, &self.config),
-                    theme.muted,
-                    Self::cycle_quality,
-                )],
+                vec![
+                    settings_button(
+                        cx,
+                        theme,
+                        speed_label(&lang, &self.config),
+                        theme.muted,
+                        Self::cycle_speed,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        connections_label(&lang, &self.config),
+                        theme.muted,
+                        Self::cycle_conns,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        quality_label(&lang, &self.config),
+                        theme.muted,
+                        Self::cycle_quality,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        self.config.language.clone(),
+                        theme.muted,
+                        Self::cycle_lang,
+                    ),
+                ],
             ))
             .child(setting_row(
                 theme,
                 i18n::t(&lang, "set.language"),
                 String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    self.config.language.clone(),
-                    theme.muted,
-                    Self::cycle_lang,
-                )],
+                vec![
+                    settings_button(
+                        cx,
+                        theme,
+                        self.config.language.clone(),
+                        theme.muted,
+                        Self::cycle_lang,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.open"),
+                        theme.muted,
+                        Self::open_lang_dir,
+                    ),
+                ],
             ))
             .child(setting_row(
                 theme,
-                i18n::t(&lang, "set.organize"),
+                i18n::t(&lang, "set.behavior"),
                 String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    on_off(&lang, self.config.organize_by_category),
-                    theme.muted,
-                    Self::toggle_organize,
-                )],
-            ))
-            .child(setting_row(
-                theme,
-                i18n::t(&lang, "set.monitor"),
-                String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    on_off(&lang, self.config.clipboard_monitor),
-                    theme.muted,
-                    Self::toggle_monitor,
-                )],
-            ))
-            .child(setting_row(
-                theme,
-                i18n::t(&lang, "set.shutdown"),
-                String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    on_off(&lang, self.config.shutdown_after_queue),
-                    theme.muted,
-                    Self::toggle_shutdown,
-                )],
-            ))
-            .child(setting_row(
-                theme,
-                i18n::t(&lang, "set.theme"),
-                String::new(),
-                vec![settings_button(
-                    cx,
-                    theme,
-                    on_off(&lang, self.config.dark_mode),
-                    theme.muted,
-                    Self::toggle_theme,
-                )],
+                vec![
+                    settings_button(
+                        cx,
+                        theme,
+                        on_off(&lang, self.config.organize_by_category),
+                        theme.muted,
+                        Self::toggle_organize,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        on_off(&lang, self.config.clipboard_monitor),
+                        theme.muted,
+                        Self::toggle_monitor,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        on_off(&lang, self.config.shutdown_after_queue),
+                        theme.muted,
+                        Self::toggle_shutdown,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        on_off(&lang, self.config.dark_mode),
+                        theme.muted,
+                        Self::toggle_theme,
+                    ),
+                ],
             ))
             .child(setting_row(
                 theme,
                 i18n::t(&lang, "set.sched"),
                 String::new(),
+                {
+                    let days = self.config.schedule.map(|s| s.days).unwrap_or(0);
+                    let mut actions = vec![settings_button(
+                        cx,
+                        theme,
+                        sched_label(&lang, &self.config),
+                        theme.muted,
+                        Self::toggle_sched,
+                    )];
+                    for (day, letter) in ["M", "T", "W", "T", "F", "S", "S"]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let day = day as u8;
+                        let on = (days & (1 << day)) != 0;
+                        actions.push(settings_button(
+                            cx,
+                            theme,
+                            letter.to_string(),
+                            if on { theme.primary } else { theme.muted },
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.toggle_sched_day(day, cx);
+                            }),
+                        ));
+                    }
+                    actions
+                },
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.times"),
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(self.field_box_for(
+                        window,
+                        cx,
+                        theme,
+                        |v| &v.sched_start,
+                        |v| &mut v.sched_start,
+                        "01:00",
+                    ))
+                    .child(self.field_box_for(
+                        window,
+                        cx,
+                        theme,
+                        |v| &v.sched_end,
+                        |v| &mut v.sched_end,
+                        "06:00",
+                    )),
                 vec![settings_button(
                     cx,
                     theme,
-                    sched_label(&lang, &self.config),
-                    theme.muted,
-                    Self::toggle_sched,
+                    i18n::t(&lang, "tb.apply"),
+                    theme.primary,
+                    Self::apply_sched,
                 )],
             ))
             .child(setting_row(
                 theme,
                 i18n::t(&lang, "set.video"),
                 tools_value,
+                vec![
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.setup_video"),
+                        theme.primary,
+                        Self::setup_video_tools,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.browse"),
+                        theme.muted,
+                        Self::browse_ytdlp,
+                    ),
+                    settings_button(
+                        cx,
+                        theme,
+                        i18n::t(&lang, "tb.clear"),
+                        theme.muted,
+                        Self::clear_ytdlp,
+                    ),
+                ],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.proxy"),
+                self.field_box_for(
+                    window,
+                    cx,
+                    theme,
+                    |v| &v.proxy_field,
+                    |v| &mut v.proxy_field,
+                    "http://127.0.0.1:8080",
+                ),
                 vec![settings_button(
                     cx,
                     theme,
-                    i18n::t(&lang, "tb.setup_video"),
+                    i18n::t(&lang, "tb.apply"),
                     theme.primary,
-                    Self::setup_video_tools,
+                    Self::apply_proxy,
+                )],
+            ))
+            .child(setting_row(
+                theme,
+                i18n::t(&lang, "set.repo"),
+                self.field_box_for(
+                    window,
+                    cx,
+                    theme,
+                    |v| &v.repo_field,
+                    |v| &mut v.repo_field,
+                    "owner/name",
+                ),
+                vec![settings_button(
+                    cx,
+                    theme,
+                    i18n::t(&lang, "tb.apply"),
+                    theme.primary,
+                    Self::apply_repo,
                 )],
             ))
             .child(setting_row(
@@ -1699,6 +2201,32 @@ impl DownloadManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_units() {
+        assert_eq!(fmt_bytes(0), "0 B");
+        assert_eq!(fmt_bytes(512), "512 B");
+        assert_eq!(fmt_bytes(1536), "1.5 KiB");
+        assert_eq!(fmt_bytes(5 * 1024 * 1024), "5.0 MiB");
+    }
+
+    #[test]
+    fn eta_shapes() {
+        assert_eq!(fmt_eta(5), "00:05");
+        assert_eq!(fmt_eta(65), "01:05");
+        assert_eq!(fmt_eta(3665), "1:01:05");
+    }
+
+    #[test]
+    fn minutes_roundtrip() {
+        assert_eq!(minutes_to_hhmm(60), "01:00");
+        assert_eq!(minutes_to_hhmm(1439), "23:59");
+    }
+}
+
 fn main() {
     // Same source as the CLI so both tools share settings.
     let config = match AppConfig::config_path() {
@@ -1712,7 +2240,7 @@ fn main() {
     });
     let limiter = SpeedLimiter::shared(config.speed_limit_kbps, config.enable_speed_limit);
     Application::new().run(move |cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(780.), px(640.)), cx);
+        let bounds = Bounds::centered(None, size(px(780.), px(700.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

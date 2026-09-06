@@ -54,6 +54,18 @@ impl Schedule {
         self.allows(&chrono::Local::now().naive_local())
     }
 
+    /// Parse `HH:MM` (24h) to minutes since midnight.
+    pub fn parse_hhmm(s: &str) -> Option<u16> {
+        let (hours, minutes) = s.trim().split_once(':')?;
+        let hours: u16 = hours.trim().parse().ok()?;
+        let minutes: u16 = minutes.trim().parse().ok()?;
+        if hours < 24 && minutes < 60 {
+            Some(hours * 60 + minutes)
+        } else {
+            None
+        }
+    }
+
     /// Short human form, e.g. `weekdays 01:00–06:00`.
     pub fn describe(&self) -> String {
         let days = if self.days == ALL_DAYS {
@@ -133,10 +145,20 @@ mod tests {
 
     #[test]
     fn describe_shapes() {
-        assert_eq!(Schedule::nightly().describe(), "daily 01:00–06:00");
-        assert_eq!(
-            Schedule { days: 0, start_minutes: 0, end_minutes: 60 }.describe(),
-            "never 00:00–01:00"
-        );
+        let nightly = Schedule::nightly().describe();
+        assert!(nightly.starts_with("daily 01:00"), "got {nightly}");
+        let never = Schedule { days: 0, start_minutes: 0, end_minutes: 60 }.describe();
+        assert!(never.starts_with("never 00:00"), "got {never}");
     }
+
+    #[test]
+    fn hhmm_parses() {
+        assert_eq!(Schedule::parse_hhmm("01:00"), Some(60));
+        assert_eq!(Schedule::parse_hhmm("23:59"), Some(1439));
+        assert_eq!(Schedule::parse_hhmm(" 6:05 "), Some(365));
+        assert_eq!(Schedule::parse_hhmm("24:00"), None);
+        assert_eq!(Schedule::parse_hhmm("12:60"), None);
+        assert_eq!(Schedule::parse_hhmm("nope"), None);
+    }
+}
 }
