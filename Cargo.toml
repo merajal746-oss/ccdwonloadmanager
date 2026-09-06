@@ -4,4 +4,5 @@ members = [
     "crates/ccdm-core",
     "crates/ccdm-cli",
     "crates/ccdm-gpui",
+    "crates/ccdm-host",
 ]

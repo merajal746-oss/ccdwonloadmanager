@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "ccDM Browser Bridge",
+  "version": "0.7.0",
+  "description": "Send downloads to ccdwonloadmanager (ccdm-host must be installed, see ext/README).",
+  "permissions": ["downloads"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ccdm-bridge@example.com"
+    }
+  }
+}

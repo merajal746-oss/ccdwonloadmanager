@@ -6,6 +6,7 @@
 //! HLS/DASH media, download queue, categories and config. No XDM source
 //! is copied here.
 
+pub mod browser;
 pub mod cancel;
 pub mod config;
 pub mod error;
@@ -17,6 +18,7 @@ pub mod segmented;
 pub mod speed_limiter;
 pub mod store;
 
+pub use browser::{HOST_NAME, HostRequest, HostResponse};
 pub use cancel::CancelFlag;
 pub use config::AppConfig;
 pub use error::{CcdmError, Result};

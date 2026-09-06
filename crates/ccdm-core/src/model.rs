@@ -185,6 +185,15 @@ pub fn guess_file_name(url: &str) -> String {
     }
 }
 
+/// Unique-enough id without extra dependencies (millis + pid).
+pub fn new_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}-{}",
+        crate::speed_limiter::now_ms(),
+        std::process::id()
+    )
+}
+
 /// Make a server-provided file name safe to use on Windows and Unix
 /// (cf. XDM's file-name helpers): `< > : " / \ | ? *` and control
 /// characters become `_`, trailing dots/spaces (illegal on Windows) are

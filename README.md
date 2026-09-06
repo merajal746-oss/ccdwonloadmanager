@@ -5,9 +5,9 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.6 = HLS (m3u8) + DASH (mpd) downloads: dependency-free playlist
-> parsers, best-rendition picking, `.ts`/`.mp4` output, auto-dispatch for
-> playlist URLs in CLI and GUI, media hint in `probe`.
+> v0.7 = browser integration: native-messaging host (`ccdm-host --stdio`,
+> `install`, `manifest`), MV3 extension for Chrome/Edge/Firefox that takes
+> over downloads, GUI live-imports browser-queued URLs.
 
 ## What works today
 
@@ -35,9 +35,11 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media (HLS/DASH)
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media (HLS/DASH), browser protocol
 crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
+crates/ccdm-host   browser native-messaging host (--stdio/install/manifest)
+ext/               MV3 bridge extension (chrome + firefox) + install guide
 .github/workflows  CI: fmt + clippy + test, then release builds per OS
 ```
 
@@ -60,10 +62,10 @@ port its *concepts* clean-room (no copied code):
 | Transient-vs-fatal failures | `CcdmError::is_transient` + 3-attempt backoff in CLI `start` |
 | Progressive/adaptive HTTP downloaders | `http::{probe, download_with_resume, download_segmented}` |
 | HLS/DASH, `MediaParser` | `media::{parse_master, parse_media, parse_mpd, download_media, download_auto}` (encrypted HLS + live MPD refused with `Unsupported`) |
+| Browser monitoring, native host | `browser::{read_message, write_message, handle_request}` + `ccdm-host` + `ext/` MV3 bridge |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
-Still to port: FFmpeg wrapper, browser
-native-messaging host + extensions, clipboard monitor, scheduler
+Still to port: FFmpeg wrapper, clipboard monitor, scheduler
 (`DownloadSchedule`), updater, translations, themes.
 
 License: **GPL-2.0-only** (compatible with XDM's GPL-2.0). See `LICENSE`.
@@ -115,7 +117,20 @@ next chunk boundary; **Resume** continues from the `.part` files. The queue
 is the same file the CLI uses, so `ccdm-cli list` sees GUI downloads too.
 Finished rows offer **Folder** (reveals the file location) and **Again**
 (deletes outputs and downloads afresh). The **Organize** toggle sorts new
-downloads into `Video/`, `Documents/`, … subfolders. **Speed** and
+downloads into `Video/`, `Documents/`, … subfolders.
+
+## Browser integration
+
+```sh
+ccdm-host install   # writes manifest + registers it (Windows reg)
+```
+
+Load `ext/chrome` (or `ext/firefox`) as an unpacked/temporary extension,
+put its id into the manifest's `allowed_origins`/`allowed_extensions`
+(full steps in `ext/README.md`). New browser downloads are then cancelled
+in-browser and queued in ccdM instead — the GUI imports them live, and
+`ccdm-cli list` shows them too. Without the host, the browser downloads
+normally. **Speed** and
 **Connections** apply to newly started downloads.
 
 ## Roadmap
@@ -124,6 +139,6 @@ downloads into `Video/`, `Documents/`, … subfolders. **Speed** and
 - [x] In-GUI speed-limit control + per-download connection setting
 - [x] Categories folders, finished-file actions (open folder, re-download)
 - [x] HLS (m3u8) + DASH (mpd) downloaders
-- [ ] Browser integration (native-messaging host + extension)
+- [x] Browser integration (native-messaging host + extension)
 - [ ] Clipboard monitor, queue scheduler, shutdown-on-finish
 - [ ] Video probe/convert via system ffmpeg, updater, translations

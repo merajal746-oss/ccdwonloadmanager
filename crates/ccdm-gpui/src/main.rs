@@ -246,6 +246,7 @@ struct DownloadManager {
     rx: Receiver<UiEvent>,
     store: Store,
     saved: HashMap<String, String>,
+    store_mtime: Option<std::time::SystemTime>,
 }
 
 impl DownloadManager {
@@ -263,6 +264,7 @@ impl DownloadManager {
                 cx.background_executor().timer(Duration::from_millis(250)).await;
                 let alive = view.update(cx, |this, cx| {
                     this.drain_events();
+                    this.sync_from_store();
                     this.refresh_rows();
                     this.persist_if_changed();
                     cx.notify();
@@ -331,6 +333,7 @@ impl DownloadManager {
             rx,
             store,
             saved,
+            store_mtime: None,
         }
     }
 
@@ -533,8 +536,47 @@ impl DownloadManager {
         cx.notify();
     }
 
-    fn drain_events(&mut self) {
-        while let Ok(event) = self.rx.try_recv() {
+    /// Import queue entries added externally (browser host, CLI) since the
+    /// last poll, detected via the store file's mtime.
+    fn sync_from_store(&mut self) {
+        let mtime = std::fs::metadata(self.store.path())
+            .and_then(|meta| meta.modified())
+            .ok();
+        if mtime == self.store_mtime {
+            return;
+        }
+        self.store_mtime = mtime;
+        let fresh = match Store::load_from(self.store.path()) {
+            Ok(store) => store,
+            Err(_) => return,
+        };
+        for entry in fresh.queue().iter_ordered() {
+            if self.workers.iter().any(|w| w.id == entry.id) {
+                continue;
+            }
+            let worker = Worker::new(
+                entry.id.clone(),
+                entry.url.clone(),
+                entry.file_name.clone(),
+            );
+            *worker.status.lock().unwrap() = match entry.status {
+                DownloadStatus::Finished => RowStatus::Finished,
+                DownloadStatus::Paused => RowStatus::Paused,
+                DownloadStatus::Failed => RowStatus::Failed,
+                DownloadStatus::Queued | DownloadStatus::Downloading => RowStatus::Queued,
+            };
+            worker
+                .downloaded
+                .store(entry.downloaded_bytes, Ordering::Relaxed);
+            if let Some(total) = entry.total_bytes {
+                worker.total.store(total, Ordering::Relaxed);
+            }
+            self.notice = format!("browser added {}", worker.file_name);
+            self.workers.push(worker);
+        }
+    }
+
+    fn drain_events(&mut self) {        while let Ok(event) = self.rx.try_recv() {
             match event {
                 UiEvent::AddRow(worker) => {
                     self.notice = format!("added {} — hit Start", worker.file_name);
