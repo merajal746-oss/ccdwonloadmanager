@@ -20,7 +20,10 @@ use std::sync::{
 use anyhow::Context;
 use clap::{Parser, Subcommands};
 
+use ccdm_core::convert::ConvertTarget;
+use ccdm_core::i18n;
 use ccdm_core::model::{resolve_dest, sanitize_file_name};
+use ccdm_core::update;
 use ccdm_core::{
     AppConfig, Category, DownloadEntry, DownloadStatus, SharedLimiter, SpeedLimiter, Store, http,
     media,
@@ -79,6 +82,26 @@ enum Commands {
         #[arg(long)]
         shutdown: bool,
     },
+    /// Convert a media file with system ffmpeg.
+    Convert {
+        /// File to convert.
+        file: PathBuf,
+        /// Target format (mp3|mp4).
+        #[arg(short, long, default_value = "mp3")]
+        to: String,
+    },
+    /// Check GitHub releases for a newer version.
+    UpdateCheck {
+        /// Override the configured update_repo (owner/name).
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Show or set the UI language.
+    Lang {
+        /// Language code to use (needs lang/<code>.json unless en).
+        #[arg(short, long)]
+        set: Option<String>,
+    },
 }
 
 /// Stable-enough unique id without extra dependencies.
@@ -132,6 +155,7 @@ async fn run_with_retry(
     dest: &Path,
     segments: usize,
     limiter: Option<SharedLimiter>,
+    lang: &str,
 ) -> (anyhow::Result<()>, u64, Option<u64>) {
     let (got, total, progress) = make_progress();
     let mut attempt = 0u32;
@@ -158,7 +182,18 @@ async fn run_with_retry(
             }
             Err(e) if e.is_transient() && attempt < 3 => {
                 let wait = 2u64.pow(attempt);
-                eprintln!("  attempt {attempt} failed ({e}); retrying in {wait}s...");
+                eprintln!(
+                    "{}",
+                    i18n::format(
+                        lang,
+                        "c.retry",
+                        &[
+                            ("n", &attempt.to_string()),
+                            ("e", &e.to_string()),
+                            ("w", &wait.to_string()),
+                        ]
+                    )
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
             }
             Err(e) => {
@@ -182,10 +217,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config = match AppConfig::config_path() {
+    let mut config = match AppConfig::config_path() {
         Some(path) => AppConfig::load(&path).unwrap_or_default(),
         None => AppConfig::default(),
     };
+    ccdm_core::i18n::load_available();
+    let lang = config.language.clone();
     let client = http::build_client_with(&config).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let limiter = SpeedLimiter::shared(config.speed_limit_kbps, config.enable_speed_limit);
 
@@ -194,22 +231,49 @@ async fn main() -> anyhow::Result<()> {
             let info = http::probe(&client, &url)
                 .await
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            println!("final url : {}", info.final_url);
-            println!("file name : {}", sanitize_file_name(&info.file_name));
-            match info.total_bytes {
-                Some(n) => println!("size      : {n} bytes"),
-                None => println!("size      : unknown"),
-            }
-            println!("ranges    : {}", info.supports_ranges);
             println!(
-                "mime      : {}",
-                info.content_type.as_deref().unwrap_or("-")
+                "{}",
+                i18n::format(&lang, "c.probe_url", &[("v", &info.final_url)])
+            );
+            println!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.probe_name",
+                    &[("v", &sanitize_file_name(&info.file_name))]
+                )
+            );
+            let unknown = i18n::t(&lang, "c.probe_unknown");
+            match info.total_bytes {
+                Some(n) => println!(
+                    "{}",
+                    i18n::format(&lang, "c.probe_size", &[("v", &format!("{n} bytes"))])
+                ),
+                None => println!(
+                    "{}",
+                    i18n::format(&lang, "c.probe_size", &[("v", &unknown)])
+                ),
+            }
+            println!(
+                "{}",
+                i18n::format(&lang, "c.probe_ranges", &[("v", &info.supports_ranges.to_string())])
+            );
+            println!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.probe_mime",
+                    &[("v", info.content_type.as_deref().unwrap_or("-"))]
+                )
             );
             let media_hint = match media::detect_media(&url, info.content_type.as_deref()) {
                 Some(kind) => kind.to_string(),
                 None => "-".to_string(),
             };
-            println!("media     : {media_hint}");
+            println!(
+                "{}",
+                i18n::format(&lang, "c.probe_media", &[("v", &media_hint)])
+            );
         }
         Commands::Download {
             url,
@@ -230,10 +294,16 @@ async fn main() -> anyhow::Result<()> {
             };
             let segments = connections.unwrap_or(config.max_connections).clamp(1, 32);
             eprintln!(
-                "downloading {} -> {} ({} segments)",
-                info.final_url,
-                dest.display(),
-                segments
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.downloading",
+                    &[
+                        ("url", &info.final_url),
+                        ("dest", &dest.display().to_string()),
+                        ("n", &segments.to_string()),
+                    ]
+                )
             );
 
             let (got, _total, progress) = make_progress();
@@ -250,10 +320,14 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| format!("download of {} failed", info.final_url))?;
 
+            let got_bytes = got.load(Ordering::Relaxed).to_string();
             eprintln!(
-                "done: {} ({} bytes)",
-                dest.display(),
-                got.load(Ordering::Relaxed)
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.done",
+                    &[("dest", &dest.display().to_string()), ("n", &got_bytes)]
+                )
             );
         }
         Commands::Add { url, name } => {
@@ -275,12 +349,19 @@ async fn main() -> anyhow::Result<()> {
             );
             store.queue_mut().add(entry);
             store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            println!("added {id}  {file_name}  {}", info.final_url);
+            println!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.added",
+                    &[("id", &id), ("file", &file_name), ("url", &info.final_url)]
+                )
+            );
         }
         Commands::List => {
             let store = Store::load().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             if store.queue().is_empty() {
-                println!("queue is empty");
+                println!("{}", i18n::t(&lang, "c.empty"));
             }
             for e in store.queue().iter_ordered() {
                 let pct = e
@@ -289,20 +370,27 @@ async fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|| "   ---".to_string());
                 println!("{}  {:?}  {}  {}  {}", e.id, e.status, pct, e.file_name, e.url);
             }
-            println!("stored in {}", store.path().display());
+            println!(
+                "{}",
+                i18n::format(&lang, "c.stored", &[("p", &store.path().display().to_string())])
+            );
         }
         Commands::Start { id, connections, force, wait, shutdown } => {
             if let Some(schedule) = &config.schedule {
                 if !force && !schedule.allows_now() {
+                    let window = schedule.describe();
                     if wait {
-                        println!("waiting for scheduled window ({})…", schedule.describe());
+                        println!(
+                            "{}",
+                            i18n::format(&lang, "c.waiting", &[("w", &window)])
+                        );
                         while !schedule.allows_now() {
                             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
                         }
                     } else {
                         println!(
-                            "outside scheduled window ({}); rerun with --force or --wait",
-                            schedule.describe()
+                            "{}",
+                            i18n::format(&lang, "c.outside", &[("w", &window)])
                         );
                         return Ok(());
                     }
@@ -311,7 +399,7 @@ async fn main() -> anyhow::Result<()> {
             let mut store = Store::load().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             if let Some(one) = &id {
                 if store.queue().get(one).is_none() {
-                    anyhow::bail!("unknown id: {one}");
+                    anyhow::bail!("{}", i18n::format(&lang, "c.unknown", &[("id", one)]));
                 }
                 if let Some(e) = store.queue_mut().get_mut(one) {
                     if matches!(e.status, DownloadStatus::Paused | DownloadStatus::Failed) {
@@ -329,7 +417,7 @@ async fn main() -> anyhow::Result<()> {
                     .collect(),
             };
             if ids.is_empty() {
-                println!("nothing queued");
+                println!("{}", i18n::t(&lang, "c.none"));
                 return Ok(());
             }
             let segments = connections.unwrap_or(config.max_connections).clamp(1, 32);
@@ -349,9 +437,20 @@ async fn main() -> anyhow::Result<()> {
                     &Category::default_categories(),
                     config.organize_by_category,
                 );
-                eprintln!("starting {one} -> {} ({} segments)", dest.display(), segments);
+                eprintln!(
+                    "{}",
+                    i18n::format(
+                        &lang,
+                        "c.starting",
+                        &[
+                            ("id", &one),
+                            ("dest", &dest.display().to_string()),
+                            ("n", &segments.to_string()),
+                        ]
+                    )
+                );
                 let (res, got, tot) =
-                    run_with_retry(&client, &url, &dest, segments, limiter.clone()).await;
+                    run_with_retry(&client, &url, &dest, segments, limiter.clone(), &lang).await;
                 if let Some(e) = store.queue_mut().get_mut(&one) {
                     e.downloaded_bytes = got;
                     if let Some(t) = tot {
@@ -361,23 +460,114 @@ async fn main() -> anyhow::Result<()> {
                         Ok(()) => {
                             e.status = DownloadStatus::Finished;
                             done += 1;
-                            eprintln!("done: {}", dest.display());
+                            eprintln!(
+                                "{}",
+                                i18n::format(
+                                    &lang,
+                                    "c.row_done",
+                                    &[("dest", &dest.display().to_string())]
+                                )
+                            );
                         }
                         Err(err) => {
                             e.status = DownloadStatus::Failed;
                             failed += 1;
-                            eprintln!("failed {}: {err:#}", dest.display());
+                            eprintln!(
+                                "{}",
+                                i18n::format(
+                                    &lang,
+                                    "c.row_fail",
+                                    &[
+                                        ("dest", &dest.display().to_string()),
+                                        ("e", &format!("{err:#}")),
+                                    ]
+                                )
+                            );
                         }
                     }
                 }
                 store.save().map_err(|e| anyhow::anyhow!(e.to_string()))?;
             }
-            println!("finished: {done} ok, {failed} failed");
+            println!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.summary",
+                    &[("ok", &done.to_string()), ("failed", &failed.to_string())]
+                )
+            );
             if shutdown && failed == 0 && done > 0 {
-                println!("queue complete, shutting down in 60s…");
+                println!("{}", i18n::t(&lang, "c.shutting"));
                 if let Err(e) = ccdm_core::power::shutdown_host(60) {
-                    eprintln!("shutdown failed: {e}");
+                    eprintln!(
+                        "{}",
+                        i18n::format(&lang, "c.shut_fail", &[("e", &e.to_string())])
+                    );
                 }
+            }
+        }
+        Commands::Convert { file, to } => {
+            let target = ConvertTarget::parse(&to)
+                .ok_or_else(|| anyhow::anyhow!("unknown format: {to} (mp3|mp4)"))?;
+            eprintln!(
+                "{}",
+                i18n::format(
+                    &lang,
+                    "c.converting",
+                    &[("src", &file.display().to_string()), ("fmt", target.extension())]
+                )
+            );
+            let output = ccdm_core::convert::convert(&file, target)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            println!(
+                "{}",
+                i18n::format(&lang, "c.converted", &[("out", &output.display().to_string())])
+            );
+        }
+        Commands::UpdateCheck { repo } => {
+            let repo = repo
+                .or(config.update_repo.clone())
+                .ok_or_else(|| anyhow::anyhow!(i18n::t(&lang, "c.upd_none")))?;
+            let info = ccdm_core::update::latest_release(&repo, &client)
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let current = env!("CARGO_PKG_VERSION");
+            if ccdm_core::update::is_newer(current, &info.tag) {
+                println!(
+                    "{}",
+                    i18n::format(
+                        &lang,
+                        "c.upd_new",
+                        &[("tag", &info.tag), ("url", &info.url)]
+                    )
+                );
+            } else {
+                println!(
+                    "{}",
+                    i18n::format(&lang, "c.upd_cur", &[("v", current)])
+                );
+            }
+        }
+        Commands::Lang { set } => {
+            if let Some(code) = set {
+                config.language = code.clone();
+                match AppConfig::config_path() {
+                    Some(path) => {
+                        config
+                            .save(&path)
+                            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                        println!(
+                            "{}",
+                            i18n::format(&lang, "c.lang_set", &[("l", &code)])
+                        );
+                    }
+                    None => anyhow::bail!("no config dir on this platform"),
+                }
+            } else {
+                println!(
+                    "{}",
+                    i18n::format(&lang, "c.lang_cur", &[("l", &config.language)])
+                );
             }
         }
     }

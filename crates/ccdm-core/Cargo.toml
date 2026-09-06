@@ -1,6 +1,6 @@
 [package]
 name = "ccdm-core"
-version = "0.1.0"
+version = "0.9.0"
 edition = "2021"
 description = "Core download engine for ccdwonloadmanager (Rust port of XDM concepts)"
 license = "GPL-2.0-only"

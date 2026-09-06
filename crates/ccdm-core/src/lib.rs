@@ -9,8 +9,10 @@
 pub mod browser;
 pub mod cancel;
 pub mod config;
+pub mod convert;
 pub mod error;
 pub mod http;
+pub mod i18n;
 pub mod media;
 pub mod model;
 pub mod power;
@@ -19,6 +21,7 @@ pub mod schedule;
 pub mod segmented;
 pub mod speed_limiter;
 pub mod store;
+pub mod update;
 
 pub use browser::{HOST_NAME, HostRequest, HostResponse};
 pub use cancel::CancelFlag;

@@ -34,6 +34,12 @@ pub struct AppConfig {
     pub clipboard_monitor: bool,
     /// Power off the machine when the queue drains cleanly.
     pub shutdown_after_queue: bool,
+    /// UI language code (`en` embedded; others via `lang/<code>.json`).
+    pub language: String,
+    /// Dark theme in the GUI (light when false).
+    pub dark_mode: bool,
+    /// `owner/name` for release checks. `None` (default) disables them.
+    pub update_repo: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -52,6 +58,9 @@ impl Default for AppConfig {
             schedule: None,
             clipboard_monitor: false,
             shutdown_after_queue: false,
+            language: crate::i18n::DEFAULT_LANG.to_string(),
+            dark_mode: true,
+            update_repo: None,
         }
     }
 }

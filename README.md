@@ -5,9 +5,10 @@ Rust download manager in the spirit of **Xtreme Download Manager (XDM)**,
 built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 (only `git`).
 
-> v0.8 = clipboard monitor (auto-queues copied links), download scheduler
-> (weekly window, `--force`/`--wait`, GUI Sched toggle), shutdown-on-finish
-> (`--shutdown`, GUI toggle).
+> v0.9 = ffmpeg convert (`convert`, GUI MP3 button), self-update check
+> (`update-check`, GUI notice), translations (embedded English + `lang/`
+> overrides, `lang` command, translated GUI/CLI), dark/light themes.
+> The original XDM-concept roadmap is now complete — see remaining limits.
 
 ## What works today
 
@@ -15,19 +16,21 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 - Live queue: per-row progress bars, %/bytes, status, URL
 - Row buttons: Start, Pause (cooperative cancel), Resume, Retry, Remove
 - **Add from clipboard**: probes the URL in the background, dedupes
-- Toolbar: speed-cap cycle (unlimited → 10 MiB/s), connections cycle (1→32),
-  organize toggle — all persisted to `config.json`
-- Finished rows: **Folder** (reveals file location), **Again** (re-downloads)
-- Queue auto-persists on every state change; reloads on startup
+- Toolbar: speed / connections / organize / monitor / sched / shutdown / theme
+- Finished rows: **Folder**, **Again**, **MP3** (ffmpeg convert)
+- Translated UI, dark/light themes, auto-persisted queue
 
 **CLI (`ccdm-cli`)**
-- `probe` (size, name, range support, mime), one-shot `download`
-- `add` / `list` / `start [--id]` over the same persisted queue as the GUI
+- `probe` (size, name, range support, mime, media hint), one-shot `download`
+- `add` / `list` / `start [--id] [--force] [--wait] [--shutdown]`
+- `convert <file> [--to mp3|mp4]`, `update-check`, `lang [--set CODE]`
 - Resumable segmented downloads, transient-error retries with backoff
 
 **Engine (`ccdm-core`)**
 - Segmented multi-connection HTTP with per-part resume + stale-part repair
 - HLS + DASH: playlist parsing, best rendition, `.ts`/`.mp4` assembly
+- ffmpeg convert (MP3/MP4 via system binary), release update checks
+- Translations (embedded English, external `lang/*.json`), scheduler, power
 - Global speed cap enforced across all segments, proxy support
 - Filename guessing + sanitizing, categories + `resolve_dest()` folders
 - JSON config + versioned JSON queue store
@@ -35,7 +38,7 @@ built entirely by **GitHub Actions** so you need **no Rust toolchain locally**
 ## Layout
 
 ```text
-crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media, browser, schedule, power
+crates/ccdm-core   engine: model, config, queue, store, cancel, segments, speed limit, HTTP, media, browser, schedule, power, convert, update, i18n
 crates/ccdm-cli    headless manager: probe/download/add/list/start
 crates/ccdm-gpui   live GUI (GPUI 0.2.2): rows, progress bars, buttons, settings
 crates/ccdm-host   browser native-messaging host (--stdio/install/manifest)
@@ -65,9 +68,14 @@ port its *concepts* clean-room (no copied code):
 | Browser monitoring, native host | `browser::{read_message, write_message, handle_request}` + `ccdm-host` + `ext/` MV3 bridge |
 | Scheduler, shutdown | `schedule::Schedule` (weekly window), `power::shutdown_host`, CLI `--force/--wait/--shutdown` |
 | Clipboard monitor | GUI toggle, polled in the refresh loop, auto-probes copied links |
+| Video converter | `convert::{convert, ConvertTarget}` via system ffmpeg (`convert`, GUI MP3) |
+| Updater | `update::{latest_release, is_newer}` (`update-check`, GUI notice) |
+| Translations | `i18n::{t, format, load_file}` — embedded English + `lang/*.json` |
+| Themes/skins | GUI `Theme` (dark/light toggle) |
 | WPF/GTK UI + queue window | `ccdm-gpui`: live rows, worker threads, 4 Hz poll loop, clipboard add |
 
-Still to port: FFmpeg wrapper, updater, translations, themes.
+Known limits (not yet done): DASH multi-audio muxing, SQLite named queues,
+in-GUI text input, per-row connection override, encrypted HLS, live DASH.
 
 License: **GPL-2.0-only** (compatible with XDM's GPL-2.0). See `LICENSE`.
 
@@ -102,13 +110,19 @@ ccdm-cli probe <URL>
 ccdm-cli download <URL> [--output out.bin] [--connections 8]
 ccdm-cli add <URL> [--name file.zip]
 ccdm-cli list
-ccdm-cli start [--id ID] [--connections 8]
+ccdm-cli start [--id ID] [--connections 8] [--force] [--wait] [--shutdown]
+ccdm-cli convert <file> [--to mp3|mp4]
+ccdm-cli update-check [--repo owner/name]
+ccdm-cli lang [--set CODE]
 ```
 
 Config lives in `<config-dir>/ccdm/config.json`, the queue in
-`<config-dir>/ccdm/queue.json` (Windows: `%APPDATA%\ccdm\...`).
+`<config-dir>/ccdm/queue.json` (Windows: `%APPDATA%\ccdm\...`), language
+files in `<config-dir>/ccdm/lang/<code>.json`.
 Edit `config.json` to set `speed_limit_kbps` / `enable_speed_limit`,
-`max_connections`, `proxy_url`, or `organize_by_category` by hand.
+`max_connections`, `proxy_url`, `organize_by_category`, `schedule`,
+`clipboard_monitor`, `shutdown_after_queue`, `language`, `dark_mode`,
+or `update_repo` by hand.
 
 ## GUI usage (after downloading the artifact)
 
@@ -142,4 +156,4 @@ normally. **Speed** and
 - [x] HLS (m3u8) + DASH (mpd) downloaders
 - [x] Browser integration (native-messaging host + extension)
 - [x] Clipboard monitor, queue scheduler, shutdown-on-finish
-- [ ] Video probe/convert via system ffmpeg, updater, translations
+- [x] Video probe/convert via system ffmpeg, updater, translations, themes

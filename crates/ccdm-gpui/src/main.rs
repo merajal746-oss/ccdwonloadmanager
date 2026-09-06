@@ -26,7 +26,7 @@ use ccdm_core::model::{resolve_dest, sanitize_file_name};
 use ccdm_core::speed_limiter::now_ms;
 use ccdm_core::{
     AppConfig, CancelFlag, Category, DownloadEntry, DownloadStatus, Schedule, SharedLimiter,
-    SpeedLimiter, Store, http, media,
+    SpeedLimiter, Store, http, i18n, media,
 };
 
 /// Engine-side state of one row.
@@ -40,14 +40,17 @@ enum RowStatus {
 }
 
 impl RowStatus {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Downloading => "downloading",
-            Self::Paused => "paused",
-            Self::Finished => "finished",
-            Self::Failed => "failed",
-        }
+    fn label(self, lang: &str) -> String {
+        i18n::t(
+            lang,
+            match self {
+                Self::Queued => "st.queued",
+                Self::Downloading => "st.downloading",
+                Self::Paused => "st.paused",
+                Self::Finished => "st.finished",
+                Self::Failed => "st.failed",
+            },
+        )
     }
 }
 
@@ -134,41 +137,110 @@ fn new_id(n: usize) -> String {
 const SPEED_STEPS: &[u32] = &[0, 256, 512, 1024, 2048, 5120, 10240];
 /// Per-download connection steps cycled by the toolbar button.
 const CONN_STEPS: &[usize] = &[1, 2, 4, 8, 16, 32];
-
-fn speed_label(config: &AppConfig) -> String {    if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
-        "Speed: unlimited".to_string()
+fn speed_label(lang: &str, config: &AppConfig) -> String {
+    let value = if !config.enable_speed_limit || config.speed_limit_kbps == 0 {
+        i18n::t(lang, "tb.unlimited")
     } else if config.speed_limit_kbps >= 1024 {
-        format!(
-            "Speed: {:.1} MiB/s",
-            config.speed_limit_kbps as f32 / 1024.0
-        )
+        format!("{:.1} MiB/s", config.speed_limit_kbps as f32 / 1024.0)
     } else {
-        format!("Speed: {} KiB/s", config.speed_limit_kbps)
-    }
+        format!("{} KiB/s", config.speed_limit_kbps)
+    };
+    i18n::format(lang, "tb.speed", &[("v", &value)])
 }
 
-fn organize_label(config: &AppConfig) -> String {
-    format!("Organize: {}", if config.organize_by_category { "on" } else { "off" })
+fn connections_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(
+        lang,
+        "tb.connections",
+        &[("n", &config.max_connections.to_string())],
+    )
 }
 
-fn monitor_label(config: &AppConfig) -> String {
-    format!("Monitor: {}", if config.clipboard_monitor { "on" } else { "off" })
+fn on_off(lang: &str, on: bool) -> String {
+    i18n::t(lang, if on { "cm.on" } else { "cm.off" })
 }
 
-fn sched_label(config: &AppConfig) -> String {
+fn organize_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(lang, "tb.organize", &[("v", &on_off(lang, config.organize_by_category))])
+}
+
+fn monitor_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(lang, "tb.monitor", &[("v", &on_off(lang, config.clipboard_monitor))])
+}
+
+fn sched_label(lang: &str, config: &AppConfig) -> String {
     match &config.schedule {
-        Some(schedule) => format!("Sched: {}", schedule.describe()),
-        None => "Sched: off".to_string(),
+        Some(schedule) => i18n::format(lang, "tb.sched", &[("v", &schedule.describe())]),
+        None => i18n::t(lang, "tb.sched_off"),
     }
 }
 
-fn shutdown_label(config: &AppConfig) -> String {
-    format!("Shutdown: {}", if config.shutdown_after_queue { "on" } else { "off" })
+fn shutdown_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(lang, "tb.shutdown", &[("v", &on_off(lang, config.shutdown_after_queue))])
 }
+
+fn theme_label(lang: &str, config: &AppConfig) -> String {
+    i18n::format(
+        lang,
+        "tb.theme",
+        &[("v", &i18n::t(lang, if config.dark_mode { "cm.dark" } else { "cm.light" }))],
+    )
+}
+
+/// Full-window palette (cf. XDM skins). Toggle with the Theme button.
+#[derive(Debug, Clone, Copy)]
+struct Theme {
+    bg: u32,
+    card: u32,
+    track: u32,
+    accent: u32,
+    text: u32,
+    dim: u32,
+    warn: u32,
+    faint: u32,
+    ok: u32,
+    danger: u32,
+    primary: u32,
+    muted: u32,
+    hover: u32,
+}
+
+const THEME_DARK: Theme = Theme {
+    bg: 0x1e1e2e,
+    card: 0x313244,
+    track: 0x11111b,
+    accent: 0x89b4fa,
+    text: 0xffffff,
+    dim: 0xa6adc8,
+    warn: 0xf9e2af,
+    faint: 0x6c7086,
+    ok: 0x40a02b,
+    danger: 0xf38ba8,
+    primary: 0x89b4fa,
+    muted: 0x585b70,
+    hover: 0x45475a,
+};
+
+const THEME_LIGHT: Theme = Theme {
+    bg: 0xeff1f5,
+    card: 0xffffff,
+    track: 0xccd0da,
+    accent: 0x1e66f5,
+    text: 0x4c4f69,
+    dim: 0x6c6f85,
+    warn: 0xdf8e1d,
+    faint: 0x9ca0b0,
+    ok: 0x40a02b,
+    danger: 0xd20f39,
+    primary: 0x1e66f5,
+    muted: 0xacb0be,
+    hover: 0xdce0e8,
+};
 
 /// Clickable label. `on_click` receives the mouse-down event like the
 /// official `input.rs` example does.
 fn button(
+    theme: Theme,
     label: String,
     bg: u32,
     on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -178,7 +250,7 @@ fn button(
         .py_1()
         .bg(rgb(bg))
         .rounded_lg()
-        .hover(|s| s.bg(rgb(0x45475a)))
+        .hover(move |s| s.bg(rgb(theme.hover)))
         .text_sm()
         .on_mouse_down(MouseButton::Left, on_click)
         .child(label)
@@ -254,6 +326,7 @@ struct DownloadManager {
     notice: String,
     categories: Vec<Category>,
     config_summary: String,
+    theme: Theme,
     config: AppConfig,
     client: reqwest::Client,
     limiter: Option<SharedLimiter>,
@@ -333,17 +406,43 @@ impl DownloadManager {
         } else {
             "no speed cap".to_string()
         };
+        let theme = if config.dark_mode { THEME_DARK } else { THEME_LIGHT };
+        if let Some(repo) = config.update_repo.clone() {
+            let update_tx = tx.clone();
+            let update_lang = config.language.clone();
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                if let Ok(runtime) = runtime {
+                    if let Ok(client) = ccdm_core::http::build_client() {
+                        if let Ok(info) =
+                            runtime.block_on(ccdm_core::update::latest_release(&repo, &client))
+                        {
+                            if ccdm_core::update::is_newer(env!("CARGO_PKG_VERSION"), &info.tag) {
+                                let _ = update_tx.send(UiEvent::Notice(i18n::format(
+                                    &update_lang,
+                                    "n.update",
+                                    &[("tag", &info.tag), ("url", &info.url)],
+                                )));
+                            }
+                        }
+                    }
+                }
+            });
+        }
         Self {
-            title: "ccdwonloadmanager".into(),
+            title: i18n::t(&config.language, "app.title").into(),
             workers,
             rows: Vec::new(),
-            notice: "Copy a download link, then hit “Add from clipboard”.".to_string(),
+            notice: i18n::t(&config.language, "app.clip_hint"),
             categories: Category::default_categories(),
             config_summary: format!(
                 "dir: {} | {} conn | {cap}",
                 config.download_dir.display(),
                 config.max_connections,
             ),
+            theme,
             config,
             client,
             limiter,
@@ -363,9 +462,10 @@ impl DownloadManager {
     fn start_row(&mut self, id: String, cx: &mut Context<Self>) {
         if let Some(schedule) = &self.config.schedule {
             if !schedule.allows_now() {
-                self.notice = format!(
-                    "outside scheduled window ({}); toggle Sched to run now",
-                    schedule.describe()
+                self.notice = i18n::format(
+                    &self.config.language,
+                    "n.outside",
+                    &[("w", &schedule.describe())],
                 );
                 cx.notify();
                 return;
@@ -426,10 +526,11 @@ impl DownloadManager {
         match AppConfig::config_path() {
             Some(path) => {
                 if let Err(e) = self.config.save(&path) {
-                    self.notice = format!("config save failed: {e}");
+                    self.notice =
+                        i18n::format(&self.config.language, "n.save_c", &[("e", &e.to_string())]);
                 }
             }
-            None => self.notice = "no config dir on this platform".to_string(),
+            None => self.notice = i18n::t(&self.config.language, "n.no_cfgdir"),
         }
     }
 
@@ -457,6 +558,17 @@ impl DownloadManager {
 
     fn toggle_shutdown(&mut self, cx: &mut Context<Self>) {
         self.config.shutdown_after_queue = !self.config.shutdown_after_queue;
+        self.save_config();
+        cx.notify();
+    }
+
+    fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+        self.config.dark_mode = !self.config.dark_mode;
+        self.theme = if self.config.dark_mode {
+            THEME_DARK
+        } else {
+            THEME_LIGHT
+        };
         self.save_config();
         cx.notify();
     }
@@ -500,9 +612,10 @@ impl DownloadManager {
         if all_done && any_finished {
             self.config.shutdown_after_queue = false;
             self.save_config();
-            self.notice = "queue complete, shutting down in 60s…".to_string();
+            self.notice = i18n::t(&self.config.language, "n.shutting");
             if let Err(e) = ccdm_core::power::shutdown_host(60) {
-                self.notice = format!("shutdown failed: {e}");
+                self.notice =
+                    i18n::format(&self.config.language, "n.shut_fail", &[("e", &e.to_string())]);
             }
         }
     }
@@ -521,10 +634,11 @@ impl DownloadManager {
             Some(path) => {
                 let target = path.parent().map(|parent| parent.to_path_buf()).unwrap_or(path);
                 if let Err(e) = open::that(&target) {
-                    self.notice = format!("cannot open folder: {e}");
+                    self.notice =
+                        i18n::format(&self.config.language, "n.reveal", &[("e", &e.to_string())]);
                 }
             }
-            None => self.notice = "row not found".to_string(),
+            None => self.notice = i18n::t(&self.config.language, "n.notfound"),
         }
         cx.notify();
     }
@@ -553,11 +667,52 @@ impl DownloadManager {
         self.start_row(id, cx);
     }
 
+    /// Convert a finished row's file to MP3 in a worker thread.
+    fn convert_row(&mut self, id: String, cx: &mut Context<Self>) {
+        let lang = self.config.language.clone();
+        let input = self.find(&id).map(|worker| {
+            resolve_dest(
+                &self.config.download_dir,
+                &worker.file_name,
+                &self.categories,
+                self.config.organize_by_category,
+            )
+        });
+        let Some(input) = input else {
+            self.notice = i18n::t(&lang, "n.notfound");
+            cx.notify();
+            return;
+        };
+        if !ccdm_core::convert::ffmpeg_available() {
+            self.notice = i18n::t(&lang, "n.no_ffmpeg");
+            cx.notify();
+            return;
+        }
+        let update_tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result =
+                ccdm_core::convert::convert(&input, ccdm_core::convert::ConvertTarget::Mp3);
+            let message = match result {
+                Ok(path) => {
+                    i18n::format(&lang, "n.converted", &[("out", &path.display().to_string())])
+                }
+                Err(e) => i18n::format(&lang, "n.convert_fail", &[("e", &e.to_string())]),
+            };
+            let _ = update_tx.send(UiEvent::Notice(message));
+        });
+        self.notice = i18n::format(
+            &lang,
+            "n.converting",
+            &[("file", &input.display().to_string())],
+        );
+        cx.notify();
+    }
+
     fn pause_row(&mut self, id: String, cx: &mut Context<Self>) {        if let Some(name) = self.find(&id).map(|worker| {
             worker.cancel.cancel();
             worker.file_name.clone()
         }) {
-            self.notice = format!("pausing {name} …");
+            self.notice = i18n::format(&self.config.language, "n.pausing", &[("name", &name)]);
         }
         cx.notify();
     }
@@ -568,13 +723,14 @@ impl DownloadManager {
             .map(|w| w.alive.load(Ordering::SeqCst))
             .unwrap_or(false);
         if busy {
-            self.notice = "pause it before removing".to_string();
+            self.notice = i18n::t(&self.config.language, "n.busy");
         } else {
             self.workers.retain(|w| w.id != id);
             self.store.queue_mut().remove(&id);
             self.saved.remove(&id);
             if let Err(e) = self.store.save() {
-                self.notice = format!("queue save failed: {e}");
+                self.notice =
+                    i18n::format(&self.config.language, "n.save_q", &[("e", &e.to_string())]);
             } else {
                 self.notice = String::new();
             }
@@ -589,7 +745,7 @@ impl DownloadManager {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         let Some(url) = url else {
-            self.notice = "clipboard has no text — copy a link first".to_string();
+            self.notice = i18n::t(&self.config.language, "n.no_text");
             cx.notify();
             return;
         };
@@ -600,7 +756,7 @@ impl DownloadManager {
     /// button and the clipboard monitor).
     fn add_url(&mut self, url: String, cx: &mut Context<Self>) {
         if self.workers.iter().any(|w| w.url == url) {
-            self.notice = "that URL is already in the list".to_string();
+            self.notice = i18n::t(&self.config.language, "n.dup");
             cx.notify();
             return;
         }
@@ -634,7 +790,7 @@ impl DownloadManager {
                 },
             }
         });
-        self.notice = format!("probing {url} …");
+        self.notice = i18n::format(&self.config.language, "n.probing", &[("url", &url)]);
         cx.notify();
     }
 
@@ -673,15 +829,24 @@ impl DownloadManager {
             if let Some(total) = entry.total_bytes {
                 worker.total.store(total, Ordering::Relaxed);
             }
-            self.notice = format!("browser added {}", worker.file_name);
+            self.notice = i18n::format(
+                &self.config.language,
+                "n.browser",
+                &[("file", &worker.file_name)],
+            );
             self.workers.push(worker);
         }
     }
 
-    fn drain_events(&mut self) {        while let Ok(event) = self.rx.try_recv() {
+    fn drain_events(&mut self) {
+        while let Ok(event) = self.rx.try_recv() {
             match event {
                 UiEvent::AddRow(worker) => {
-                    self.notice = format!("added {} — hit Start", worker.file_name);
+                    self.notice = i18n::format(
+                        &self.config.language,
+                        "n.added",
+                        &[("file", &worker.file_name)],
+                    );
                     self.workers.push(worker);
                 }
                 UiEvent::Notice(message) => {
@@ -724,7 +889,8 @@ impl DownloadManager {
             self.store.queue_mut().add(entry);
         }
         if let Err(e) = self.store.save() {
-            self.notice = format!("queue save failed: {e}");
+            self.notice =
+                i18n::format(&self.config.language, "n.save_q", &[("e", &e.to_string())]);
         }
     }
 
@@ -749,30 +915,45 @@ impl DownloadManager {
 
 impl Render for DownloadManager {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let lang = self.config.language.clone();
         let total = self.rows.len();
         let active = self.rows.iter().filter(|row| row.running).count();
+        let theme = self.theme;
         div()
             .flex()
             .flex_col()
             .gap_3()
-            .bg(rgb(0x1e1e2e))
+            .bg(rgb(theme.bg))
             .size_full()
             .p_4()
-            .text_color(rgb(0xffffff))
+            .text_color(rgb(theme.text))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_xl().child(format!("{} — live queue", self.title)))
+                    .child(
+                        div()
+                            .text_xl()
+                            .child(i18n::format(
+                                &lang,
+                                "app.live",
+                                &[("t", &self.title.to_string())],
+                            )),
+                    )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xa6adc8))
-                            .child(format!(
-                                "{total} row(s), {active} active, {} categories • {}",
-                                self.categories.len(),
-                                self.config_summary,
+                            .text_color(rgb(theme.dim))
+                            .child(i18n::format(
+                                &lang,
+                                "app.stats",
+                                &[
+                                    ("total", &total.to_string()),
+                                    ("active", &active.to_string()),
+                                    ("cats", &self.categories.len().to_string()),
+                                    ("cfg", &self.config_summary),
+                                ],
                             )),
                     ),
             )
@@ -781,15 +962,16 @@ impl Render for DownloadManager {
                     .flex()
                     .gap_2()
                     .child(button(
-                        "Add from clipboard".to_string(),
-                        0x40a02b,
+                        theme,
+                        i18n::t(&lang, "tb.add"),
+                        theme.ok,
                         cx.listener(|this, _event, _window, cx| this.add_from_clipboard(cx)),
                     ))
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0xf9e2af))
+                            .text_color(rgb(theme.warn))
                             .child(self.notice.clone()),
                     ),
             )
@@ -798,26 +980,29 @@ impl Render for DownloadManager {
                     .flex()
                     .gap_2()
                     .child(button(
-                        speed_label(&self.config),
-                        0x585b70,
+                        theme,
+                        speed_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.cycle_speed(cx)),
                     ))
                     .child(button(
-                        format!("Connections: {}", self.config.max_connections),
-                        0x585b70,
+                        theme,
+                        connections_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.cycle_conns(cx)),
                     ))
                     .child(button(
-                        organize_label(&self.config),
-                        0x585b70,
+                        theme,
+                        organize_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.toggle_organize(cx)),
                     ))
                     .child(
                         div()
                             .flex_1()
                             .text_xs()
-                            .text_color(rgb(0x6c7086))
-                            .child("apply to newly started downloads"),
+                            .text_color(rgb(theme.faint))
+                            .child(i18n::t(&lang, "app.hint_settings")),
                     ),
             )
             .child(
@@ -825,33 +1010,42 @@ impl Render for DownloadManager {
                     .flex()
                     .gap_2()
                     .child(button(
-                        monitor_label(&self.config),
-                        0x585b70,
+                        theme,
+                        monitor_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.toggle_monitor(cx)),
                     ))
                     .child(button(
-                        sched_label(&self.config),
-                        0x585b70,
+                        theme,
+                        sched_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.toggle_sched(cx)),
                     ))
                     .child(button(
-                        shutdown_label(&self.config),
-                        0x585b70,
+                        theme,
+                        shutdown_label(&lang, &self.config),
+                        theme.muted,
                         cx.listener(|this, _event, _window, cx| this.toggle_shutdown(cx)),
+                    ))
+                    .child(button(
+                        theme,
+                        theme_label(&lang, &self.config),
+                        theme.muted,
+                        cx.listener(|this, _event, _window, cx| this.toggle_theme(cx)),
                     ))
                     .child(
                         div()
                             .flex_1()
                             .text_xs()
-                            .text_color(rgb(0x6c7086))
-                            .child("monitor adds copied links • sched gates starts"),
+                            .text_color(rgb(theme.faint))
+                            .child(i18n::t(&lang, "app.hint_auto")),
                     ),
             )
             .child(if self.rows.is_empty() {
                 div()
                     .text_sm()
-                    .text_color(rgb(0x6c7086))
-                    .child("Queue is empty — copy a download link, then hit “Add from clipboard”.")
+                    .text_color(rgb(theme.faint))
+                    .child(i18n::t(&lang, "app.empty"))
             } else {
                 div().flex().flex_col().gap_2().children(self.rows.iter().map(
                     |row| {
@@ -865,16 +1059,19 @@ impl Render for DownloadManager {
                             _ => format!("{} bytes", row.downloaded),
                         };
                         let status_text = match row.status {
-                            RowStatus::Failed => format!("failed — {}", row.detail),
-                            status => status.label().to_string(),
+                            RowStatus::Failed => {
+                                format!("{} — {}", row.status.label(&lang), row.detail)
+                            }
+                            status => status.label(&lang),
                         };
                         let mut actions = Vec::new();
                         match (row.status, row.running) {
                             (RowStatus::Downloading, _) => {
                                 let id = row.id.clone();
                                 actions.push(button(
-                                    "Pause".to_string(),
-                                    0xf38ba8,
+                                    theme,
+                                    i18n::t(&lang, "row.pause"),
+                                    theme.danger,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.pause_row(id.clone(), cx);
                                     }),
@@ -883,26 +1080,40 @@ impl Render for DownloadManager {
                             (RowStatus::Finished, _) => {
                                 let folder_id = row.id.clone();
                                 actions.push(button(
-                                    "Folder".to_string(),
-                                    0x89b4fa,
+                                    theme,
+                                    i18n::t(&lang, "row.folder"),
+                                    theme.primary,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.reveal_row(folder_id.clone(), cx);
                                     }),
                                 ));
                                 let again_id = row.id.clone();
                                 actions.push(button(
-                                    "Again".to_string(),
-                                    0x585b70,
+                                    theme,
+                                    i18n::t(&lang, "row.again"),
+                                    theme.muted,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.redownload_row(again_id.clone(), cx);
                                     }),
                                 ));
+                                if ccdm_core::convert::convertible_to_mp3(&row.file_name) {
+                                    let mp3_id = row.id.clone();
+                                    actions.push(button(
+                                        theme,
+                                        i18n::t(&lang, "row.mp3"),
+                                        theme.ok,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.convert_row(mp3_id.clone(), cx);
+                                        }),
+                                    ));
+                                }
                             }
                             (RowStatus::Failed, _) => {
                                 let id = row.id.clone();
                                 actions.push(button(
-                                    "Retry".to_string(),
-                                    0x89b4fa,
+                                    theme,
+                                    i18n::t(&lang, "row.retry"),
+                                    theme.primary,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.start_row(id.clone(), cx);
                                     }),
@@ -911,8 +1122,9 @@ impl Render for DownloadManager {
                             (RowStatus::Paused, _) => {
                                 let id = row.id.clone();
                                 actions.push(button(
-                                    "Resume".to_string(),
-                                    0x89b4fa,
+                                    theme,
+                                    i18n::t(&lang, "row.resume"),
+                                    theme.primary,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.start_row(id.clone(), cx);
                                     }),
@@ -921,8 +1133,9 @@ impl Render for DownloadManager {
                             _ => {
                                 let id = row.id.clone();
                                 actions.push(button(
-                                    "Start".to_string(),
-                                    0x89b4fa,
+                                    theme,
+                                    i18n::t(&lang, "row.start"),
+                                    theme.primary,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.start_row(id.clone(), cx);
                                     }),
@@ -931,8 +1144,9 @@ impl Render for DownloadManager {
                         }
                         let remove_id = row.id.clone();
                         actions.push(button(
-                            "Remove".to_string(),
-                            0x585b70,
+                            theme,
+                            i18n::t(&lang, "row.remove"),
+                            theme.muted,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.remove_row(remove_id.clone(), cx);
                             }),
@@ -943,7 +1157,7 @@ impl Render for DownloadManager {
                             .gap_1()
                             .px_3()
                             .py_2()
-                            .bg(rgb(0x313244))
+                            .bg(rgb(theme.card))
                             .rounded_lg()
                             .child(
                                 div()
@@ -959,7 +1173,7 @@ impl Render for DownloadManager {
                                     .child(
                                         div()
                                             .text_sm()
-                                            .text_color(rgb(0xa6adc8))
+                                            .text_color(rgb(theme.dim))
                                             .child(status_text),
                                     ),
                             )
@@ -971,13 +1185,13 @@ impl Render for DownloadManager {
                                         div()
                                             .w(px(280.0))
                                             .h(px(10.0))
-                                            .bg(rgb(0x11111b))
+                                            .bg(rgb(theme.track))
                                             .rounded_lg()
                                             .child(
                                                 div()
                                                     .w(px(280.0 * frac))
                                                     .h(px(10.0))
-                                                    .bg(rgb(0x89b4fa))
+                                                    .bg(rgb(theme.accent))
                                                     .rounded_lg(),
                                             ),
                                     )
@@ -985,14 +1199,14 @@ impl Render for DownloadManager {
                                         div()
                                             .flex_1()
                                             .text_xs()
-                                            .text_color(rgb(0xa6adc8))
+                                            .text_color(rgb(theme.dim))
                                             .child(progress_text),
                                     ),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(rgb(0x6c7086))
+                                    .text_color(rgb(theme.faint))
                                     .truncate()
                                     .child(row.url.clone()),
                             )
@@ -1009,6 +1223,7 @@ fn main() {
         Some(path) => AppConfig::load(&path).unwrap_or_default(),
         None => AppConfig::default(),
     };
+    ccdm_core::i18n::load_available();
     let client = http::build_client_with(&config).unwrap_or_else(|e| {
         eprintln!("proxy config invalid ({e}); continuing without proxy");
         http::build_client().expect("default http client")
