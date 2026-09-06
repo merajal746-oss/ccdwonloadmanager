@@ -37,7 +37,6 @@ impl Render for DownloadManager {
             .child(
                 div()
                     .text_xl()
-                    .font_weight(gpui::FontWeight::BOLD)
                     .child(format!("{} — v0.1 (GPUI)", self.title)),
             )
             .child(div().text_sm().child(format!(
